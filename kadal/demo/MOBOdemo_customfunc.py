@@ -1,7 +1,6 @@
 import sys
 sys.path.insert(0, "..")
 import numpy as np
-from kadal.testcase.analyticalfcn.cases import evaluate
 from kadal.surrogate_models.kriging_model import Kriging
 from kadal.surrogate_models.supports.initinfo import initkriginfo
 from kadal.misc.sampling.samplingplan import sampling
@@ -21,14 +20,14 @@ def generate_kriging():
     X = sample
     # Evaluate sample
     global y
-    y = evaluate(X, "schaffer")
+    y = myproblem(X)
 
     # Initialize KrigInfo
     KrigInfo1 = initkriginfo("single")
     # Set KrigInfo
     KrigInfo1["X"] = X
     KrigInfo1["y"] = y[:,0].reshape(-1,1)
-    KrigInfo1["problem"] = "schaffer"
+    KrigInfo1["problem"] = myproblem
     KrigInfo1["nrestart"] = 5
     KrigInfo1["ub"] = ub
     KrigInfo1["lb"] = lb
@@ -62,6 +61,19 @@ def runopt(krigobj1, krigobj2):
     xupdate,yupdate,supdate,metricall = Optim.run(disp=True)
 
     return xupdate,yupdate,metricall
+
+def myproblem(x):
+    r = 1
+    a = 1 / (2 * r)
+    m = np.size(x, 0)
+    n = np.size(x, 1)
+    f = np.zeros(shape=[m, 2])
+    for i in range(0, m):
+        f[i, 0] = (1 / (n ** a)) * np.sum(x[i, :] ** 2) ** a
+        f[i, 1] = (1 / (n ** a)) * np.sum((1 - x[i, :]) ** 2) ** a
+    if m == 1:
+        f = f[0, :]
+    return f
 
 if __name__ == '__main__':
     krigobj1, krigobj2 = generate_kriging()

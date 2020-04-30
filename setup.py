@@ -1,6 +1,6 @@
 '''
 Author: Ghifari Adam Faza <ghifariadamf@gmail.com>
-This package is distributed under MIT license.
+This package is distributed under BSD-3 license.
 '''
 
 from setuptools import setup
@@ -26,7 +26,7 @@ Our code is under active development and we aim to incorporate more sophisticate
 
 metadata = dict(
     name='kadal',
-    version='1.0.1',
+    version='1.0.2',
     description='Kriging for Analysis, Design optimization, And expLoration.',
     long_description=LONG_DESCRIPTION,
     author='Pramudita S. Palar, Ghifari Adam F, Kemas Zakaria, Timothy Jim',

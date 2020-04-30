@@ -337,12 +337,17 @@ class MOBO:
             None
         """
         # Evaluate new sample
-        if np.ndim(xnext) == 1:
-            ynext = evaluate(xnext, self.kriglist[0].KrigInfo['problem'])
+        if type(self.kriglist[0].KrigInfo['problem']) == str:
+            if np.ndim(xnext) == 1:
+                ynext = evaluate(xnext, self.kriglist[0].KrigInfo['problem'])
+            else:
+                ynext = np.zeros(shape=[np.size(xnext, 0), len(self.kriglist)])
+                for ii in range(np.size(xnext,0)):
+                    ynext[ii,:] = evaluate(xnext[ii,:],  self.kriglist[0].KrigInfo['problem'])
+        elif callable(self.kriglist[0].KrigInfo['problem']):
+            ynext = self.kriglist[0].KrigInfo['problem'](xnext)
         else:
-            ynext = np.zeros(shape=[np.size(xnext, 0), len(self.kriglist)])
-            for ii in range(np.size(xnext,0)):
-                ynext[ii,:] = evaluate(xnext[ii,:],  self.kriglist[0].KrigInfo['problem'])
+            raise ValueError('KrigInfo["problem"] is not a string nor a callable function!')
 
         # Treatment for failed solutions, Reference : "Forrester, A. I., SÃ³bester, A., & Keane, A. J. (2006). Optimization with missing data.
         # Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences, 462(2067), 935-945."

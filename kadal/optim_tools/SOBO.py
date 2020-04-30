@@ -72,7 +72,10 @@ class SOBO:
                 pass
 
             # Evaluate response for next decision variable
-            self.ynext = evaluate(self.xnext,self.krigobj.KrigInfo['problem'])
+            if type(self.kriglist[0].KrigInfo['problem']) == str:
+                self.ynext = evaluate(self.xnext,self.krigobj.KrigInfo['problem'])
+            elif callable(self.kriglist[0].KrigInfo['problem']):
+                self.ynext = self.kriglist[0].KrigInfo['problem'](self.xnext)
 
             # Treatment for failed solutions, Reference : "Forrester, A. I., SÃ³bester, A., & Keane, A. J. (2006). Optimization with missing data.
             # Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences, 462(2067), 935-945."
