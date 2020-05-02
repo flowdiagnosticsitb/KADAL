@@ -222,22 +222,21 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
         fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'diff_evo':
-        xnextcand = np.zeros(shape=[moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]])
-        fnextcand = np.zeros(shape=[moboInfo["nrestart"]])
+        if moboInfo['ehvisampling'] == 'efficient':
+            init_seed = efficientsamp(kriglist, ypar, npop=300)
+        else:
+            init_seed = 'latinhypercube'
+
         optimbound = np.hstack((kriglist[0].KrigInfo["lb"].reshape(-1, 1), kriglist[0].KrigInfo["ub"].reshape(-1, 1)))
-        for im in range(0, moboInfo["nrestart"]):
-            if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
-                res = differential_evolution(acqufunhandle, optimbound, args=(ypar,moboInfo,kriglist))
-                xnextcand[im, :] = res.x
-                fnextcand[im] = res.fun
-            else:
-                res = differential_evolution(multiconstfun, optimbound,
-                                             args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist))
-                xnextcand[im, :] = res.x
-                fnextcand[im] = res.fun
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
+        if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
+            res = differential_evolution(acqufunhandle, optimbound, init=init_seed, args=(ypar,moboInfo,kriglist))
+            xnext = res.x
+            fnext = res.fun
+        else:
+            res = differential_evolution(multiconstfun, optimbound, init=init_seed,
+                                         args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist))
+            xnext = res.x
+            fnext = res.fun
 
     elif acquifuncopt.lower() == 'cobyla':
         Xrand = realval(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"],
@@ -384,3 +383,34 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None, cheapconstlis
     fx = pof*coeff*metric
 
     return fx
+
+
+def efficientsamp(kriglist, ypar, npop=300):
+    nvar = len(kriglist[0].KrigInfo["ub"])
+    templst = []
+    for ij in range(np.size(ypar, 0)):
+        idx = np.where((kriglist[0].KrigInfo["y"] == ypar[ij, 0]) &
+                       (kriglist[1].KrigInfo["y"] == ypar[ij, 1]))[0][0]
+        templst.append(idx)
+
+    initialization = kriglist[0].KrigInfo["X_norm"][templst, :] / 2 + 0.5
+
+    if initialization.ndim == 1:
+        samplenorm = np.random.normal(initialization, np.std(kriglist[0].KrigInfo['X_norm'], 0) * 0.2, (npop, nvar))
+    else:
+        n_init = np.size(initialization, 0)
+        nbatch = int(npop / n_init)
+        samplenorm = np.zeros((npop, nvar))
+        for ij in range(n_init - 1):
+            samplenorm[ij * nbatch:(ij + 1) * nbatch, :] = np.random.normal(initialization[ij, :],
+                                                                            np.std(kriglist[0].KrigInfo['X_norm'],
+                                                                                   0) * 0.2,
+                                                                            (nbatch, nvar))
+        samplenorm[(ij + 1) * nbatch:, :] = np.random.normal(initialization[(ij + 1), :],
+                                                             np.std(kriglist[0].KrigInfo['X_norm'], 0) * 0.2,
+                                                             (np.size(samplenorm[(ij + 1) * nbatch:, :], 0), nvar))
+        samplenorm[samplenorm < 0] = 0
+        samplenorm[samplenorm > 1] = 1
+
+    init_seed =realval(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"], samplenorm)
+    return init_seed
