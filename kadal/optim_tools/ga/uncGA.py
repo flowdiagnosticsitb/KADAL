@@ -25,14 +25,17 @@ def uncGA (fitnessfcn, lb, ub, opt='min',disp=False,npop=300,maxg=200,args=None,
         samplenorm = sobol_points(npop, nvar)
     else:
         if initialization.ndim == 1:
-            samplenorm = np.random.normal(initialization,.08,(npop,nvar))
+            samplenorm = np.random.normal(initialization, np.std(args[1][0].KrigInfo['X_norm'],0)*0.2, (npop,nvar))
         else:
             n_init = np.size(initialization,0)
             nbatch = int(npop/n_init)
             samplenorm = np.zeros((npop,nvar))
             for ij in range(n_init-1):
-                samplenorm[ij*nbatch:(ij+1)*nbatch, :] = np.random.normal(initialization[ij,:],.075,(nbatch,nvar))
-            samplenorm[(ij+1)*nbatch:, :] = np.random.normal(initialization[(ij+1), :], .075,
+                samplenorm[ij*nbatch:(ij+1)*nbatch, :] = np.random.normal(initialization[ij,:],
+                                                                          np.std(args[1][0].KrigInfo['X_norm'],0)*0.2,
+                                                                          (nbatch,nvar))
+            samplenorm[(ij+1)*nbatch:, :] = np.random.normal(initialization[(ij+1), :],
+                                                             np.std(args[1][0].KrigInfo['X_norm'],0)*0.2,
                                                              (np.size(samplenorm[(ij+1)*nbatch:, :],0), nvar))
             samplenorm[samplenorm < 0] = 0
             samplenorm[samplenorm > 1] = 1
