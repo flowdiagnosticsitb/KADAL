@@ -24,7 +24,7 @@ def generate_kriging():
     y = evaluate(X, "schaffer")
 
     # Initialize KrigInfo
-    KrigInfo1 = initkriginfo("single")
+    KrigInfo1 = initkriginfo()
     # Set KrigInfo
     KrigInfo1["X"] = X
     KrigInfo1["y"] = y[:,0].reshape(-1,1)

@@ -22,7 +22,7 @@ def generate_kriging():
 
     # Initialize KrigInfo
     global KrigInfo
-    KrigInfo = initkriginfo("single")
+    KrigInfo = initkriginfo()
     # Set KrigInfo
     KrigInfo["X"] = X
     KrigInfo["y"] = y

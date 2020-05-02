@@ -29,7 +29,7 @@ def generate_kriging():
     y1 = evaluate(X, "styblinski")
 
     # Initialize KrigInfo
-    KrigInfo = initkriginfo("single")
+    KrigInfo = initkriginfo()
     # Set KrigInfo
     KrigInfo["X"] = X
     KrigInfo["y"] = y1
