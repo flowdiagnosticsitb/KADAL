@@ -447,7 +447,7 @@ def moboinfocheck(moboInfo, autoupdate):
         moboInfo["acquifuncopt"] = "lbfgsb"
         print("The acquisition function optimizer is not specified, set to L-BFGS-B.")
     else:
-        availableacqoptimizer = ['lbfgsb', 'cobyla', 'cmaes', 'ga']
+        availableacqoptimizer = ['lbfgsb', 'cobyla', 'cmaes', 'ga', 'diff_evo']
         if moboInfo["acquifuncopt"].lower() not in availableacqoptimizer:
             raise ValueError(moboInfo["acquifuncopt"], " is not a valid acquisition function optimizer.")
         else:

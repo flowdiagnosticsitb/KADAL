@@ -114,7 +114,7 @@ class SOBO:
         print("Optimization finished, now creating the final outputs.")
         y_opt = np.min(self.krigobj.KrigInfo['y'])
         min_pos = np.argmin(self.krigobj.KrigInfo['y'])
-        x_opt = self.krigobj.KrigInfo['y'][min_pos,:]
+        x_opt = self.krigobj.KrigInfo['X'][min_pos,:]
         if self.autoupdate:
             return x_opt,y_opt
         else:
@@ -181,7 +181,7 @@ def soboInfocheck(soboInfo, autoupdate):
         soboInfo["acquifuncopt"] = "lbfgsb"
         print("The acquisition function optimizer is not specified, set to L-BFGS-B.")
     else:
-        availableacqoptimizer = ['lbfgsb', 'cobyla', 'cmaes']
+        availableacqoptimizer = ['lbfgsb', 'cobyla', 'cmaes','diff_evo']
         if soboInfo["acquifuncopt"].lower() not in availableacqoptimizer:
             raise ValueError(soboInfo["acquifuncopt"], " is not a valid acquisition function optimizer.")
         else:

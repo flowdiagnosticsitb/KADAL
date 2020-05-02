@@ -1,6 +1,6 @@
 import numpy as np
 from kadal.misc.sampling.samplingplan import realval
-from scipy.optimize import minimize, fmin_cobyla
+from scipy.optimize import minimize, fmin_cobyla, differential_evolution
 from kadal.optim_tools.ehvi.EHVIcomputation import ehvicalc
 from kadal.optim_tools.ga.uncGA import uncGA
 import cma
@@ -68,6 +68,24 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None):
             else:  # For constrained problem (on progress)
                 res = minimize(singleconstfun,Xrand[im,:], method='L-BFGS-B', bounds=lbfgsbbound,
                                args=(krigobj, acquifunc, krigconstlist,cheapconstlist))
+                xnextcand[im, :] = res.x
+                fnextcand[im] = res.fun
+        I = np.argmin(fnextcand)
+        xnext = xnextcand[I, :]
+        fnext = fnextcand[I]
+
+    elif acquifuncopt.lower() == 'diff_evo':
+        xnextcand = np.zeros(shape=[soboInfo["nrestart"], krigobj.KrigInfo["nvar"]])
+        fnextcand = np.zeros(shape=[soboInfo["nrestart"]])
+        optimbound = np.hstack((krigobj.KrigInfo["lb"].reshape(-1, 1), krigobj.KrigInfo["ub"].reshape(-1, 1)))
+        for im in range(0, soboInfo["nrestart"]):
+            if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
+                res = differential_evolution(krigobj.predict, optimbound, args=(acquifunc))
+                xnextcand[im, :] = res.x
+                fnextcand[im] = res.fun
+            else:
+                res = differential_evolution(singleconstfun, optimbound,
+                                             args=(krigobj, acquifunc, krigconstlist,cheapconstlist))
                 xnextcand[im, :] = res.x
                 fnextcand[im] = res.fun
         I = np.argmin(fnextcand)
@@ -197,6 +215,24 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
             else:  # For constrained problem
                 res = minimize(multiconstfun,Xrand[im,:],method='L-BFGS-B',bounds=lbfgsbbound,
                                args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist))
+                xnextcand[im, :] = res.x
+                fnextcand[im] = res.fun
+        I = np.argmin(fnextcand)
+        xnext = xnextcand[I, :]
+        fnext = fnextcand[I]
+
+    elif acquifuncopt.lower() == 'diff_evo':
+        xnextcand = np.zeros(shape=[moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]])
+        fnextcand = np.zeros(shape=[moboInfo["nrestart"]])
+        optimbound = np.hstack((kriglist[0].KrigInfo["lb"].reshape(-1, 1), kriglist[0].KrigInfo["ub"].reshape(-1, 1)))
+        for im in range(0, moboInfo["nrestart"]):
+            if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
+                res = differential_evolution(acqufunhandle, optimbound, args=(ypar,moboInfo,kriglist))
+                xnextcand[im, :] = res.x
+                fnextcand[im] = res.fun
+            else:
+                res = differential_evolution(multiconstfun, optimbound,
+                                             args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist))
                 xnextcand[im, :] = res.x
                 fnextcand[im] = res.fun
         I = np.argmin(fnextcand)
