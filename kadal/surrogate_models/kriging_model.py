@@ -48,8 +48,8 @@ class Kriging:
 
         """
 
-    def __init__(self, KrigInfo, ub=5, lb=-5, standardization=False, standtype="default", normy=True,
-                 trainvar=True, inherit=False):
+    def __init__(self, KrigInfo, ub=5, lb=-5, standardization=False, standtype="default", normy=False,
+                 trainvar=False, inherit=False):
         """
         Initialize Kriging model
 

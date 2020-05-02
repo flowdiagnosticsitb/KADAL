@@ -125,7 +125,7 @@ def init_kriginfo(objectives=1):
     return KrigInfo
 
 
-def initkriginfo(type, objective=1):
+def initkriginfo(objective=1):
     """Wrapper for init_kriginfo.
 
     Preserves old API behaviour.
