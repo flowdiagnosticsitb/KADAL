@@ -46,7 +46,7 @@ def runopt(krigobj):
     soboInfo['stalliteration'] = 40
     soboInfo['nrestart'] = 10
     soboInfo['acquifunc'] = 'EI'
-    soboInfo['acquifuncopt'] = 'lbfgsb'
+    soboInfo['acquifuncopt'] = 'diff_evo'
 
     optim = SOBO(soboInfo,krigobj,autoupdate=True)
     xnext,ynext = optim.run()

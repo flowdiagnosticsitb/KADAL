@@ -80,7 +80,7 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None):
         optimbound = np.hstack((krigobj.KrigInfo["lb"].reshape(-1, 1), krigobj.KrigInfo["ub"].reshape(-1, 1)))
         for im in range(0, soboInfo["nrestart"]):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
-                res = differential_evolution(krigobj.predict, optimbound, args=(acquifunc))
+                res = differential_evolution(krigobj.predict, optimbound, args=(acquifunc,))
                 xnextcand[im, :] = res.x
                 fnextcand[im] = res.fun
             else:
