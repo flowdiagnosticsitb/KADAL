@@ -112,7 +112,13 @@ class SOBO:
                 self.istall = 0
 
         print("Optimization finished, now creating the final outputs.")
-        return self.xnext,self.ynext
+        y_opt = np.min(self.krigobj.KrigInfo['y'])
+        min_pos = np.argmin(self.krigobj.KrigInfo['y'])
+        x_opt = self.krigobj.KrigInfo['y'][min_pos,:]
+        if self.autoupdate:
+            return x_opt,y_opt
+        else:
+            return self.xnext,self.ynext
 
 
 def soboInfocheck(soboInfo, autoupdate):
