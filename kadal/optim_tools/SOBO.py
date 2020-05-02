@@ -72,10 +72,10 @@ class SOBO:
                 pass
 
             # Evaluate response for next decision variable
-            if type(self.kriglist[0].KrigInfo['problem']) == str:
+            if type(self.krigobj.KrigInfo['problem']) == str:
                 self.ynext = evaluate(self.xnext,self.krigobj.KrigInfo['problem'])
-            elif callable(self.kriglist[0].KrigInfo['problem']):
-                self.ynext = self.kriglist[0].KrigInfo['problem'](self.xnext)
+            elif callable(self.krigobj.KrigInfo['problem']):
+                self.ynext = self.krigobj.KrigInfo['problem'](self.xnext)
 
             # Treatment for failed solutions, Reference : "Forrester, A. I., SÃ³bester, A., & Keane, A. J. (2006). Optimization with missing data.
             # Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences, 462(2067), 935-945."
@@ -143,8 +143,8 @@ def soboInfocheck(soboInfo, autoupdate):
     # Set default values
     if "stalliteration" not in soboInfo:
         if autoupdate is True:
-            soboInfo["stalliteration"] = int(np.floor(soboInfo["nsamp"]/2))
-            print("The number of stall iteration is not specified, set to nsamp/2.")
+            soboInfo["stalliteration"] = int(np.floor(soboInfo["nup"]/2))
+            print("The number of stall iteration is not specified, set to nup/2.")
         else:
             soboInfo["stalliteration"] = 1
             print("Number of stall iteration for Bayesian optimization has been set to 1")
