@@ -349,6 +349,21 @@ class MOBO:
         else:
             raise ValueError('KrigInfo["problem"] is not a string nor a callable function!')
 
+        if self.krigconstlist is not None:
+            for idx, constobj in enumerate(self.krigconstlist):
+                if type(constobj.KrigInfo['problem']) == str:
+                    ynext = evaluate(xnext, constobj.KrigInfo['problem'])
+                elif callable(constobj.KrigInfo['problem']):
+                    ynext = constobj.KrigInfo['problem'](xnext).reshape(-1,1)
+                else:
+                    raise ValueError('KrigConstInfo["problem"] is not a string nor a callable function!')
+                constobj.KrigInfo['X'] = np.vstack((constobj.KrigInfo['X'], xnext))
+                constobj.KrigInfo['y'] = np.vstack((constobj.KrigInfo['y'], ynext))
+                constobj.standardize()
+                constobj.train(disp=False)
+        else:
+            pass
+
         # Treatment for failed solutions, Reference : "Forrester, A. I., SÃ³bester, A., & Keane, A. J. (2006). Optimization with missing data.
         # Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences, 462(2067), 935-945."
         if np.isnan(ynext).any() is True:
