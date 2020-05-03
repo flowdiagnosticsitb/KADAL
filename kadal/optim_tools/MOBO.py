@@ -352,13 +352,13 @@ class MOBO:
         if self.krigconstlist is not None:
             for idx, constobj in enumerate(self.krigconstlist):
                 if type(constobj.KrigInfo['problem']) == str:
-                    ynext = evaluate(xnext, constobj.KrigInfo['problem'])
+                    ynext_const = evaluate(xnext, constobj.KrigInfo['problem'])
                 elif callable(constobj.KrigInfo['problem']):
-                    ynext = constobj.KrigInfo['problem'](xnext).reshape(-1,1)
+                    ynext_const = constobj.KrigInfo['problem'](xnext).reshape(-1,1)
                 else:
                     raise ValueError('KrigConstInfo["problem"] is not a string nor a callable function!')
                 constobj.KrigInfo['X'] = np.vstack((constobj.KrigInfo['X'], xnext))
-                constobj.KrigInfo['y'] = np.vstack((constobj.KrigInfo['y'], ynext))
+                constobj.KrigInfo['y'] = np.vstack((constobj.KrigInfo['y'], ynext_const))
                 constobj.standardize()
                 constobj.train(disp=False)
         else:
