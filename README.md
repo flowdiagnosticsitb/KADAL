@@ -1,7 +1,7 @@
 <img src="https://github.com/flowdiagnosticsitb/KADAL/blob/master/images/kadal.jpg" width="700">
 
 Kriging for Analysis, Design optimization, And expLoration (KADAL) is a Python program developed by [Flow Diagnostics Research Group](https://flowdiagnostics.ftmd.itb.ac.id "Our Lab's Homepage") from Institut Teknologi Bandung (ITB) that contains collections of Bayesian Optimization tools including various surrogate modeling methods, sampling techniques, and optimization methods.
-Currently, the program is under development and not implemented yet as a module for Python 3. Also, the coverage of the program are still limited to:
+Currently, the program is under development and not yet available on Pypi. The coverage of the program are still limited to:
 
 * Kriging
   * Ordinary Kriging
@@ -12,11 +12,10 @@ Currently, the program is under development and not implemented yet as a module 
 * Bayesian Optimization
   * Unconstrained Single-Objective Bayesian Optimization (Expected Improvement)
   * Unconstrained Multi-Objective Bayesian Optimization (ParEGO, EHVI)
-* Test Cases
-  * Branin (Single-Objective)
-  * Sasena (Single-Objective)
-  * Styblinski-Tang (Single-Objective)
-  * Schaffer (Multi-Objective)
+* Reliability Analysis
+  * AK-MCS
+* Sensitivity Analysis
+  * Sobol indices
   
 ## Required packages
 MySVR has the following dependencies:
