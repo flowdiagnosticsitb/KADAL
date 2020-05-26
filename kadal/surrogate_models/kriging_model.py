@@ -256,7 +256,7 @@ class Kriging:
 
         self.KrigInfo = likelihood(best_x,self.KrigInfo,mode='all',trainvar=self.trainvar)
 
-    def loocvcalc(self, metrictype='mape',drm=None):
+    def loocvcalc(self, metrictype='mape',type='standard'):
         """
         Calculate Leave-one-out Cross Validation metric of Kriging model
         Args:
@@ -287,9 +287,12 @@ class Kriging:
             LOOCVpred : Prediction of LOOCV.
 
         """
-
-        # self.KrigInfo["LOOCVerror"],self.KrigInfo["LOOCVpred"] = loocv(self.KrigInfo, errtype=metrictype)
-        self.KrigInfo["LOOCVerror"], self.KrigInfo["LOOCVpred"] = loocv2(self.KrigInfo, errtype=metrictype)
+        if type == 'fast':
+            self.KrigInfo["LOOCVerror"],self.KrigInfo["LOOCVpred"] = loocv(self.KrigInfo, errtype=metrictype)
+        elif type == 'standard':
+            self.KrigInfo["LOOCVerror"], self.KrigInfo["LOOCVpred"] = loocv2(self.KrigInfo, errtype=metrictype)
+        else:
+            raise ValueError('"type" only accept fast or standard')
         return (self.KrigInfo["LOOCVerror"],self.KrigInfo["LOOCVpred"])
 
     def predict(self,x,predtypes=['pred'],drmmodel=None):
