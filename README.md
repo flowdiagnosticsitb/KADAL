@@ -26,7 +26,6 @@ MySVR has the following dependencies:
 * `sobolsampling`
 * `scikit-learn`
 * `cma`
-* `comet-ml`
 
 KADAL has been tested on Python 3.6.1
 
