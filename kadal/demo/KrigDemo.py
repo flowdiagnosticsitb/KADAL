@@ -1,16 +1,20 @@
 import sys
-sys.path.insert(0, "..")
+
+sys.path.insert(0, "/home/ghifariadamf/disk_d/research/KADAL")
 import numpy as np
 import matplotlib.pyplot as plt
 from kadal.surrogate_models.kriging_model import Kriging
 from kadal.surrogate_models.kpls_model import KPLS
-from kadal.misc.sampling.samplingplan import sampling,realval,standardize
+from kadal.misc.sampling.samplingplan import sampling, realval, standardize
 from kadal.testcase.analyticalfcn.cases import evaluate
 from kadal.surrogate_models.supports.initinfo import initkriginfo
 from matplotlib import cm
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import time
+
+# from matplotlib import cmmatplotlib.pyplot as pfrom mpl_toolkits.mplot3d import Axes3D
+
 
 def generate_kriging():
     # Initialization
@@ -23,7 +27,9 @@ def generate_kriging():
     lb = np.array([-5, -5])
     nup = 3
     sampoption = "halton"
-    samplenorm, sample = sampling(sampoption, nvar, nsample, result="real", upbound=ub, lobound=lb)
+    samplenorm, sample = sampling(
+        sampoption, nvar, nsample, result="real", upbound=ub, lobound=lb
+    )
     X = sample
     # Evaluate sample
     y1 = evaluate(X, "styblinski")
@@ -49,7 +55,9 @@ def generate_kriging():
 
     # Run Kriging
     t = time.time()
-    krigobj = Kriging(KrigInfo,standardization=True,standtype='default',normy=False,trainvar=False)
+    krigobj = Kriging(
+        KrigInfo, standardization=True, standtype="default", normy=False, trainvar=False
+    )
     krigobj.train(parallel=False)
     loocverr, _ = krigobj.loocvcalc()
     elapsed = time.time() - t
@@ -69,7 +77,9 @@ def predictkrig(krigobj):
 
     # Test Kriging Output
     neval = 10000
-    samplenormout, sampleeval = sampling(sampoption, nvar, neval, result="real", upbound=ub, lobound=lb)
+    samplenormout, sampleeval = sampling(
+        sampoption, nvar, neval, result="real", upbound=ub, lobound=lb
+    )
     xx = np.linspace(-5, 5, 100)
     yy = np.linspace(-5, 5, 100)
     Xevalx, Xevaly = np.meshgrid(xx, yy)
@@ -80,7 +90,7 @@ def predictkrig(krigobj):
     # Evaluate output
     yeval = np.zeros(shape=[neval, 1])
     yact = np.zeros(shape=[neval, 1])
-    yeval = krigobj.predict(Xeval,'pred')
+    yeval, ssqr = krigobj.predict(Xeval, ["pred", "ssqr"])
     yact = evaluate(Xeval, "styblinski")
     hasil = np.hstack((yeval, yact))
 
@@ -98,10 +108,13 @@ def predictkrig(krigobj):
     x1eval = np.reshape(Xeval[:, 0], (100, 100))
     x2eval = np.reshape(Xeval[:, 1], (100, 100))
     fig = plt.figure()
-    ax = fig.gca(projection='3d')
-    surf = ax.plot_surface(x1eval, x2eval, yeval1, cmap=cm.coolwarm, linewidth=0, antialiased=False)
+    ax = fig.gca(projection="3d")
+    surf = ax.plot_surface(
+        x1eval, x2eval, yeval1, cmap=cm.coolwarm, linewidth=0, antialiased=False
+    )
     plt.show()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     krigingobj1 = generate_kriging()
     predictkrig(krigingobj1)

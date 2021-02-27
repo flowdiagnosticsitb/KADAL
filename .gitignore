@@ -9,6 +9,7 @@ innout/
 mythesis/
 *.csv
 *.PNG
+.vscode/
 
 # C extensions
 *.so
@@ -112,6 +113,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+kadalenv/
 
 # Spyder project settings
 .spyderproject
