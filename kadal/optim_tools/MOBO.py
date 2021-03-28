@@ -57,7 +57,9 @@ class MOBO:
         Run multi objective unconstrained Bayesian optimization.
 
         Args:
-            disp (bool): Display process or not. Defaults to True
+            disp (bool): Display process or not. Defaults to True.
+            infeasible (np.ndarray): Indices of infeasible to samples
+                to delete. Defaults to None.
 
         Returns:
             xupdate (nparray): Array of design variables updates.

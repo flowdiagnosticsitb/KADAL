@@ -118,7 +118,7 @@ def init_kriginfo(objectives=1):
         raise ValueError("The number of objectives must be 1 or greater.")
 
     multikeys = ['y', 'lb', 'ub', 'Theta', 'U', 'Psi', 'BE', 'y_mean', 'y_std',
-                 'SigmaSqr', 'idx', 'F', 'wgkf', 'plscoeff',"NegLnLike"]
+                 'SigmaSqr', 'idx', 'F', 'wgkf', 'plscoeff', "NegLnLike"]
     for key in multikeys:
         KrigInfo[key] = [0] * objectives
 

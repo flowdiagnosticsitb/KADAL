@@ -1,8 +1,8 @@
 import numpy as np
 from kadal.misc.sampling.samplingplan import realval
 from scipy.optimize import minimize, fmin_cobyla, differential_evolution
-from kadal.optim_tools.ehvi.EHVIcomputation import ehvicalc
-from kadal.optim_tools.ga.uncGA import uncGA
+from kadal.optim_tools.ehvi.EHVIcomputation import ehvicalc_vec
+from kadal.optim_tools.ga.uncGA import uncGA, uncGA_vec
 import cma
 
 
@@ -143,7 +143,7 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
     acquifunc = moboInfo["acquifunc"]
 
     if acquifunc.lower() == 'ehvi':
-        acqufunhandle = ehvicalc
+        acqufunhandle = ehvicalc_vec
     else:
         raise ValueError("Acquisition function handle is not available")
 
@@ -169,6 +169,8 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
         fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'ga':
+        if 'nrestart' in moboInfo:
+            print(f"'nrestart' ignored for {acquifuncopt} 'acquifuncopt'")
         if krigconstlist is None and cheapconstlist is None:
             templst = []
             if moboInfo['ehvisampling'] == 'efficient':
@@ -195,10 +197,16 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
                 init_seed = kriglist[0].KrigInfo["X_norm"][templst, :] / 2 + 0.5
             else:
                 init_seed = None
-
-            xnext, fnext, _ = uncGA(multiconstfun, lb=kriglist[0].KrigInfo["lb"], ub=kriglist[0].KrigInfo["ub"],
-                                    args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist),
-                                    initialization=init_seed)
+            breakpoint()
+            # xnext, fnext, _ = uncGA(multiconstfun, lb=kriglist[0].KrigInfo["lb"], ub=kriglist[0].KrigInfo["ub"],
+            #                         args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist),
+            #                         initialization=init_seed)
+            xnext, fnext, _ = uncGA_vec(multiconstfun,
+                                        lb=kriglist[0].KrigInfo["lb"],
+                                        ub=kriglist[0].KrigInfo["ub"],
+                                        args=(ypar, kriglist, moboInfo,
+                                              krigconstlist, cheapconstlist),
+                                        initialization=init_seed)
 
     elif acquifuncopt.lower() == 'lbfgsb':
         Xrand = realval(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"],
@@ -327,12 +335,12 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None, cheapconstlis
     Calculate the multi objective acquisition function value
 
     Args:
-        x (nparray): Decision variable to be evaluated.
+        x (nparray): [n_pop, n_dv] Decision variable to be evaluated.
         ypar (nparray): Array contains the current non-dominated solutions.
         kriglist (list): List of Kriging object.
         moboInfo (dict): A structure containing necessary information for Bayesian optimization.
-        krigconstlist (list): List of Kriging object for constraints. Defaults to None.
-        cheapconstlist (list): List of constraints function. Defaults to None.
+        krigconstlist ([Kriging]]): List of Kriging object for constraints. Defaults to None.
+        cheapconstlist ([func]]): List of constraints function. Defaults to None.
             Expected output of the constraint functions is 1 if the constraint is satisfied and 0 if not.
             The constraint functions MUST have an input of x (the decision variable to be evaluated)
 
@@ -341,46 +349,46 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None, cheapconstlis
     """
     acquifunc = moboInfo['acquifunc']
     if acquifunc.lower() == 'ehvi':
-        acqufunhandle = ehvicalc
+        acqufunhandle = ehvicalc_vec
     else:
         pass
 
-    if krigconstlist is not None:
+    n_pop, n_dv = x.shape
 
+    if krigconstlist is None:
+        pof = 1
+
+    else:
         # Change to list if the type is not list
-        if type(krigconstlist) is not list:
-            krigconstlist = [krigconstlist]
-        else:
-            pass
+        if isinstance(krigconstlist, list):
+            krigconstlist = list(krigconstlist)
 
         nkrigcon = len(krigconstlist)
 
-        pof = np.zeros(shape=[nkrigcon])
-        for ii in range(nkrigcon):
-            pof[ii] = krigconstlist[ii].predict(x, 'PoF')
-        pof = np.prod(pof)
+        pof = np.zeros([n_pop, nkrigcon])
+        for i in range(n_pop):
+            for ii in range(nkrigcon):
+                pof[i, ii] = krigconstlist[ii].predict(x[i, :], 'PoF')
+        pof = np.prod(pof, axis=1)
 
-    else:
-        pof = 1
 
     if cheapconstlist is None:
-        pass
+        coeff = 1
 
     else:
         # Change to list if the type is not list
-        if type(cheapconstlist) is not list:
-            cheapconstlist = [cheapconstlist]
-        else:
-            pass
+        if not isinstance(cheapconstlist, list):
+            cheapconstlist = list(cheapconstlist)
 
-        coeff = np.zeros(shape=[len(cheapconstlist)])
-        for jj in range(len(cheapconstlist)):
-            coeff[jj] = cheapconstlist[jj](x)
-        coeff = np.prod(coeff)
+        coeff = np.zeros([n_pop, len(cheapconstlist)])
+        for i in range(n_pop):
+            for jj in range(len(cheapconstlist)):
+                coeff[i, jj] = cheapconstlist[jj](x[i, :])
+        coeff = np.prod(coeff, axis=1)
 
     metric = acqufunhandle(x, ypar, moboInfo, kriglist)
 
-    fx = pof*coeff*metric
+    fx = pof * coeff * metric
 
     return fx
 
