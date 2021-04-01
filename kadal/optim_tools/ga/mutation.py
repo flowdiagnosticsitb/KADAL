@@ -58,7 +58,6 @@ def gaussmut_vec(feature, p_mut, ub, lb, rand_seed=0):
     is_mut = rng.random(size=[n_samp, n_dv]) < p_mut  # mask for mutations
     mut_chrom = (feature[is_mut]
                  + sdev[is_mut] * rng.standard_normal(size=len(sdev[is_mut])))
-    n_mut = mut_chrom.shape[0]
 
     # Fix any exceeded upper or lower bounds
     # To correctly index the relevant dv bound, need to tile and mask

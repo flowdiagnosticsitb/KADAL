@@ -78,10 +78,9 @@ def sbx_vec(parent_1, parent_2, lb, ub, rand_seed=0):
         offspring_1 (np.ndarray): [n_samp x n_dv] child 1 feature array.
         offspring_2 (np.ndarray): [n_samp x n_dv] child 2 feature array.
     """
-    rng = np.random.default_rng(rand_seed)
 
     n = 17
-    u = rng.random()
+    u = np.random.default_rng(rand_seed).random()
 
     n_samp, n_dv = parent_1.shape
 

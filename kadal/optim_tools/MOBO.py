@@ -496,4 +496,12 @@ def moboinfocheck(moboInfo, autoupdate):
         else:
             print("EHVI sampling is set to ", moboInfo['ehvisampling'])
 
+    if "n_cpu" not in moboInfo:
+        moboInfo['n_cpu'] = 1
+        print("n_cpu not specified, set to 1")
+    else:
+        if moboInfo["n_cpu"] < 1:
+            raise ValueError("BayesInfo['n_cpu'] should be at least one")
+        print(f"n_cpu is set to {moboInfo['n_cpu']} by user")
+
     return moboInfo
