@@ -2,7 +2,8 @@ import numpy as np
 import multiprocessing as mp
 from kadal.misc.sampling.samplingplan import realval
 from scipy.optimize import minimize, fmin_cobyla, differential_evolution
-from kadal.optim_tools.ehvi.EHVIcomputation import ehvicalc_vec
+from scipy.optimize._differentialevolution import DifferentialEvolutionSolver
+from kadal.optim_tools.ehvi.EHVIcomputation import ehvicalc, ehvicalc_vec
 from kadal.optim_tools.ga.uncGA import uncGA, uncGA_vec, uncGA2
 import cma
 
@@ -144,6 +145,8 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
     acquifunc = moboInfo["acquifunc"]
 
     if acquifunc.lower() == 'ehvi':
+        acqufunhandle = ehvicalc
+    elif acquifunc.lower() == 'ehvi_vec':
         acqufunhandle = ehvicalc_vec
     else:
         raise ValueError("Acquisition function handle is not available")
@@ -269,11 +272,54 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
             moboInfo['n_cpu'] = 1
             moboInfo['_n_cpu'] = moboInfo['n_cpu']
 
-        breakpoint()
-        res = differential_evolution(func, optimbound, init=init_seed,
-                                     args=args, workers=moboInfo['_n_cpu'])
-        xnext = res.x
-        fnext = res.fun
+        if 'de_kwargs' in moboInfo:
+            kwargs = moboInfo['de_kwargs']
+        else:
+            kwargs = {}
+
+        xnextcand = np.zeros(shape=[moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]])
+        fnextcand = np.zeros(shape=[moboInfo["nrestart"]])
+
+        # res = differential_evolution(func, optimbound, init=init_seed,
+        #                              args=args, workers=moboInfo['_n_cpu'],
+        #                              **kwargs)
+        # xnext = res.x
+        # fnext = res.fun
+
+        # Manual convergence manger...
+        import time
+        for im in range(moboInfo["nrestart"]):
+            print(f'Restart {im + 1} of {moboInfo["nrestart"]}')
+            with DifferentialEvolutionSolver(func, optimbound, init=init_seed,
+                                             args=args, workers=moboInfo['_n_cpu'],
+                                             **kwargs) as de_solver:
+                f_old = 0
+                i = 0
+                fit_err = np.nan
+                tol = kwargs.get('tol', 1e-2)
+                while i < 50 or fit_err >= tol:
+                    t_start = time.time()
+                    xnext, fnext = de_solver.next()
+                    xnextcand[im,:] = xnext
+                    fnextcand[im] = fnext
+                    # seems like de iss replacing tiny number with zero, breaking convergence
+                    if fnext == 0:
+                        # Set a tiny number so at least we don't get nans in fit_err
+                        # If a nan, the first non-nan number causes lage jump over tol
+                        fnext = np.random.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100)
+
+                    fit_err = 100 * np.abs(fnext - f_old) / fnext
+                    f_old = fnext
+
+                    # print(f'{i} fit_err: {fit_err}, xnext: {xnext}, fnext: {fnext}, time: {int(time.time()-t_start)} s')
+                    i += 1
+                    if i > 200:
+                        print('Hit max generations.')
+                        break
+
+        I = np.argmin(fnextcand)
+        xnext = xnextcand[I, :]
+        fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'cobyla':
         Xrand = realval(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"],
@@ -382,6 +428,8 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
     """
     acquifunc = moboInfo['acquifunc']
     if acquifunc.lower() == 'ehvi':
+        acqufunhandle = ehvicalc
+    elif acquifunc.lower() == 'ehvi_vec':
         acqufunhandle = ehvicalc_vec
     else:
         msg = "Only moboInfo['acquifunc'] = 'ehvi' is currently handled"
@@ -433,7 +481,10 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
 
         coeff = np.prod(coeff, axis=1)  # n_pop-len coefficient array
 
-    metric = acqufunhandle(x, ypar, moboInfo, kriglist, pool=pool)
+    if acquifunc.lower() == 'ehvi_vec':
+        metric = acqufunhandle(x, ypar, moboInfo, kriglist, pool=pool)
+    else:
+        metric = acqufunhandle(x, ypar, moboInfo, kriglist)
 
     fx = pof * coeff * metric
 

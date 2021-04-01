@@ -100,7 +100,7 @@ class MOBO:
             pass
 
         # Perform update on design space
-        if self.moboInfo['acquifunc'].lower() == 'ehvi':
+        if self.moboInfo['acquifunc'].lower() in ('ehvi', 'ehvi_vec'):
             self.ehviupdate(disp)
         elif self.moboInfo['acquifunc'].lower() == 'parego':
             self.paregoupdate(disp)
@@ -436,14 +436,14 @@ def moboinfocheck(moboInfo, autoupdate):
         moboInfo["acquifunc"] = "EHVI"
         print("The acquisition function is not specified, set to EHVI")
     else:
-        availacqfun = ["ehvi", "parego"]
+        availacqfun = ["ehvi", "ehvi_vec", "parego"]
         if moboInfo["acquifunc"].lower() not in availacqfun:
             raise ValueError(moboInfo["acquifunc"], " is not a valid acquisition function.")
         else:
             pass
 
     # Set necessary params for multiobjective acquisition function
-    if moboInfo["acquifunc"].lower() == "ehvi":
+    if moboInfo["acquifunc"].lower() in ("ehvi", "ehvi_vec"):
         if "refpoint" not in moboInfo:
             moboInfo["refpointtype"] = 'dynamic'
         else:
