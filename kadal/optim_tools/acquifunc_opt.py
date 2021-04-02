@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import multiprocessing as mp
 from kadal.misc.sampling.samplingplan import realval
@@ -188,7 +189,7 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
             init_seed = None
 
         if krigconstlist is None and cheapconstlist is None:
-            print('####### GA1')
+            # print('####### GA1')
             # xnext, fnext, _ = uncGA(acqufunhandle, lb=kriglist[0].KrigInfo["lb"], ub=kriglist[0].KrigInfo["ub"],
             #                         args=(ypar, moboInfo, kriglist), initialization=init_seed)
             func = acqufunhandle
@@ -200,7 +201,7 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
             #                                   krigconstlist, cheapconstlist),
             #                             initialization=init_seed, pool=pool)
         else:
-            print('####### GA2')
+            # print('####### GA2')
             # xnext, fnext, _ = uncGA(multiconstfun, lb=kriglist[0].KrigInfo["lb"], ub=kriglist[0].KrigInfo["ub"],
             #                         args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist),
             #                         initialization=init_seed)
@@ -209,20 +210,18 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
 
         # Start pool before GA so no time wasting creating new pools
         if moboInfo.get('n_cpu', 1) == 1:
-            pool = None
-        else:
-            pool = mp.Pool(processes=moboInfo['n_cpu'])
-
-        try:
             xnext, fnext, _ = uncGA2(func,
-                                        lb=kriglist[0].KrigInfo["lb"],
-                                        ub=kriglist[0].KrigInfo["ub"],
-                                        args=args,
-                                        initialization=init_seed, pool=pool)
-        finally:
-            if pool is not None:
-                pool.close()
-                pool.join()
+                                     lb=kriglist[0].KrigInfo["lb"],
+                                     ub=kriglist[0].KrigInfo["ub"],
+                                     args=args,
+                                     initialization=init_seed)
+        else:
+            with mp.Pool(processes=moboInfo['n_cpu']) as pool:
+                xnext, fnext, _ = uncGA2(func,
+                                         lb=kriglist[0].KrigInfo["lb"],
+                                         ub=kriglist[0].KrigInfo["ub"],
+                                         args=args,
+                                         initialization=init_seed, pool=pool)
 
     elif acquifuncopt.lower() == 'lbfgsb':
         Xrand = realval(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"],
@@ -287,9 +286,8 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
         # fnext = res.fun
 
         # Manual convergence manger...
-        import time
         for im in range(moboInfo["nrestart"]):
-            print(f'Restart {im + 1} of {moboInfo["nrestart"]}')
+            r_t = time.time()
             with DifferentialEvolutionSolver(func, optimbound, init=init_seed,
                                              args=args, workers=moboInfo['_n_cpu'],
                                              **kwargs) as de_solver:
@@ -316,6 +314,8 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
                     if i > 200:
                         print('Hit max generations.')
                         break
+
+            print(f'Restart {im + 1} of {moboInfo["nrestart"]} done, {int(time.time() - r_t)} s')
 
         I = np.argmin(fnextcand)
         xnext = xnextcand[I, :]
