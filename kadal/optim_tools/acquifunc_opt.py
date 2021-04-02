@@ -295,12 +295,12 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
                 i = 0
                 fit_err = np.nan
                 tol = kwargs.get('tol', 1e-2)
-                while i < 50 or fit_err >= tol:
+                while i < 40 or fit_err >= tol:
                     t_start = time.time()
                     xnext, fnext = de_solver.next()
                     xnextcand[im,:] = xnext
                     fnextcand[im] = fnext
-                    # seems like de iss replacing tiny number with zero, breaking convergence
+                    # seems like de is replacing tiny number with zero, breaking convergence
                     if fnext == 0:
                         # Set a tiny number so at least we don't get nans in fit_err
                         # If a nan, the first non-nan number causes lage jump over tol
@@ -309,13 +309,15 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
                     fit_err = 100 * np.abs(fnext - f_old) / fnext
                     f_old = fnext
 
-                    # print(f'{i} fit_err: {fit_err}, xnext: {xnext}, fnext: {fnext}, time: {int(time.time()-t_start)} s')
+                    # print(f'{i} fit_err: {fit_err}, xnext: {xnext}, fnext: '
+                    #       f'{fnext}, time: {int(time.time()-t_start)} s')
                     i += 1
                     if i > 200:
                         print('Hit max generations.')
                         break
-
-            print(f'Restart {im + 1} of {moboInfo["nrestart"]} done, {int(time.time() - r_t)} s')
+            print(f'fitness: {fnext}, x: {xnext}')
+            print(f'Restart {im + 1} of {moboInfo["nrestart"]} done, '
+                  f'{i} generations, {int(time.time() - r_t)} s')
 
         I = np.argmin(fnextcand)
         xnext = xnextcand[I, :]
