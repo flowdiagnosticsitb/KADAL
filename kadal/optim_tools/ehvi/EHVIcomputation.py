@@ -54,12 +54,15 @@ def EHVI(x,ypar,moboInfo,kriglist):
     return HV
 
 
-def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
+def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None, mode='tiny'):
     """Vectorised EHVI Function
 
     Vectorises above EHVI function as much as possible. Currently,
     still depends on the vectorisation of prediction.py prediction() and
     kadal.optim_tools.ehvi.exi2d.exi2d() for best performance boost.
+
+    Checks for moboInfo['n_cpu'] - if specified, multiprocessing will
+    be used for Kriging objective evaluations.
 
     Args:
         x (np.ndarray): [n_pop, n_dv] Design variables for a population.
@@ -67,6 +70,13 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
         moboInfo (dict): Structure containing necessary information for
             multiobjective Bayesian optimization.
         kriglist ([]): n_obj-len list of objective Kriging instances.
+        pool (mp.Pool, optional): An existing mp.Pool instance can be
+            specified to reduce the overhead of starting a new mp.Pool
+            with every iteration.
+        mode (None/str, optional): None, 'tiny' (default), or 'inf'.
+            For zero HV solutions, None does nothing, 'tiny' replaces
+            zeros with np.finfo("float").tiny, and 'inf' replaces zeros
+            with np.inf.
 
     Returns:
         hv (np.ndarray/float): n_pop-len array of hypervolumes for each
@@ -134,11 +144,21 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
                 pool.close()
                 pool.join()
 
-    # give penalty to HV, to avoid error in CMA-ES when in an iteration produce all HV = 0
-    z = hv == 0  # mask of values very near 0
-    rng = np.random.default_rng()
-    hv[z] = rng.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100,
-                        size=np.count_nonzero(z))
+    if mode == 'tiny':
+        # give penalty to HV, to avoid error in CMA-ES when in an iteration produce all HV = 0
+        z = hv == 0  # mask of values = 0
+        rng = np.random.default_rng()
+        hv[z] = rng.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100,
+                            size=np.count_nonzero(z))
+    elif mode == 'inf':
+        # Scipy differential evolution does not like tiny values near zero
+        # https://github.com/scipy/scipy/issues/13784
+        z = hv == 0  # mask of values = 0
+        hv[z] = np.inf
+    elif mode is None:
+        pass
+    else:
+        raise ValueError("mode flag must be set to 'tiny', 'inf', or None")
 
     # If 1D input, expects float output (legacy behaviour)
     if reshape:

@@ -245,20 +245,32 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
         fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'diff_evo':
+
+        if 'de_kwargs' in moboInfo:
+            kwargs = moboInfo['de_kwargs']
+        else:
+            kwargs = {}
+
         if moboInfo['ehvisampling'] == 'efficient':
-            init_seed = efficientsamp(kriglist, ypar, npop=300)
+            n_pop_factor = kwargs.get('popsize', 10)
+            n_var = kriglist[0].KrigInfo["nvar"]
+            n_pop = n_var * n_pop_factor
+            init_seed = efficientsamp(kriglist, ypar, npop=n_pop)
         else:
             init_seed = 'latinhypercube'
 
-        optimbound = np.hstack((kriglist[0].KrigInfo["lb"].reshape(-1, 1), kriglist[0].KrigInfo["ub"].reshape(-1, 1)))
+        # optimbound = np.hstack((kriglist[0].KrigInfo["lb"].reshape(-1, 1), kriglist[0].KrigInfo["ub"].reshape(-1, 1)))
+        optimbound = list(zip(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"]))
+
         if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
             func = acqufunhandle
             args = (ypar, moboInfo, kriglist)
+            breakpoint()  # test how to pass mode='inf'
             # res = differential_evolution(acqufunhandle, optimbound, init=init_seed, args=(ypar,moboInfo,kriglist))
 
         else:
             func = multiconstfun
-            args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist)
+            args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist, None, 'inf')
             # res = differential_evolution(multiconstfun, optimbound, init=init_seed, args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist))
 
         if '_n_cpu' in moboInfo:
@@ -268,56 +280,67 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
             moboInfo['_n_cpu'] = 1
         else:
             # Set n_cpu to 1 to stop pool in EHVI - pool set up by scipy for DE
-            moboInfo['n_cpu'] = 1
             moboInfo['_n_cpu'] = moboInfo['n_cpu']
-
-        if 'de_kwargs' in moboInfo:
-            kwargs = moboInfo['de_kwargs']
-        else:
-            kwargs = {}
+            moboInfo['n_cpu'] = 1
 
         xnextcand = np.zeros(shape=[moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]])
         fnextcand = np.zeros(shape=[moboInfo["nrestart"]])
 
-        # res = differential_evolution(func, optimbound, init=init_seed,
-        #                              args=args, workers=moboInfo['_n_cpu'],
-        #                              **kwargs)
-        # xnext = res.x
-        # fnext = res.fun
+        # Start pool before GA so no time wasting creating new pools
+        de_args = (func, optimbound)
+        de_kwargs = {'init': init_seed, 'args': args, **kwargs}
 
-        # Manual convergence manger...
         for im in range(moboInfo["nrestart"]):
             r_t = time.time()
-            with DifferentialEvolutionSolver(func, optimbound, init=init_seed,
-                                             args=args, workers=moboInfo['_n_cpu'],
-                                             **kwargs) as de_solver:
-                f_old = 0
-                i = 0
-                fit_err = np.nan
-                tol = kwargs.get('tol', 1e-2)
-                while i < 40 or fit_err >= tol:
-                    t_start = time.time()
-                    xnext, fnext = de_solver.next()
-                    xnextcand[im,:] = xnext
-                    fnextcand[im] = fnext
-                    # seems like de is replacing tiny number with zero, breaking convergence
-                    if fnext == 0:
-                        # Set a tiny number so at least we don't get nans in fit_err
-                        # If a nan, the first non-nan number causes lage jump over tol
-                        fnext = np.random.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100)
 
-                    fit_err = 100 * np.abs(fnext - f_old) / fnext
-                    f_old = fnext
-
-                    # print(f'{i} fit_err: {fit_err}, xnext: {xnext}, fnext: '
-                    #       f'{fnext}, time: {int(time.time()-t_start)} s')
-                    i += 1
-                    if i > 200:
-                        print('Hit max generations.')
-                        break
+            if moboInfo.get('_n_cpu', 1) == 1:
+                res = differential_evolution(*de_args, **de_kwargs)
+            else:
+                with mp.Pool(processes=moboInfo['_n_cpu']) as pool:
+                    res = differential_evolution(*de_args, **de_kwargs,
+                                                 workers=pool.map)
+            xnext = res.x
+            fnext = res.fun
+            i = res.nfev
+            xnextcand[im, :] = xnext
+            fnextcand[im] = fnext
             print(f'fitness: {fnext}, x: {xnext}')
             print(f'Restart {im + 1} of {moboInfo["nrestart"]} done, '
-                  f'{i} generations, {int(time.time() - r_t)} s')
+                  f'{i} func evals, {int(time.time() - r_t)} s')
+
+        # # Manual convergence manger...
+        # for im in range(moboInfo["nrestart"]):
+        #     r_t = time.time()
+        #     with DifferentialEvolutionSolver(func, optimbound, init=init_seed,
+        #                                      args=args, workers=moboInfo['_n_cpu'],
+        #                                      **kwargs) as de_solver:
+        #         f_old = 0
+        #         i = 0
+        #         fit_err = np.nan
+        #         tol = kwargs.get('tol', 1e-2)
+        #         while i < 40 or fit_err >= tol:
+        #             t_start = time.time()
+        #             xnext, fnext = de_solver.next()
+        #             xnextcand[im,:] = xnext
+        #             fnextcand[im] = fnext
+        #             # seems like de is replacing tiny number with zero, breaking convergence
+        #             if fnext == 0:
+        #                 # Set a tiny number so at least we don't get nans in fit_err
+        #                 # If a nan, the first non-nan number causes lage jump over tol
+        #                 fnext = np.random.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100)
+        #
+        #             fit_err = 100 * np.abs(fnext - f_old) / fnext
+        #             f_old = fnext
+        #
+        #             # print(f'{i} fit_err: {fit_err}, xnext: {xnext}, fnext: '
+        #             #       f'{fnext}, time: {int(time.time()-t_start)} s')
+        #             i += 1
+        #             if i > 200:
+        #                 print('Hit max generations.')
+        #                 break
+        #     print(f'fitness: {fnext}, x: {xnext}')
+        #     print(f'Restart {im + 1} of {moboInfo["nrestart"]} done, '
+        #           f'{i} generations, {int(time.time() - r_t)} s')
 
         I = np.argmin(fnextcand)
         xnext = xnextcand[I, :]
@@ -408,7 +431,7 @@ def singleconstfun(x, krigobj, acquifunc, krigconstlist=None, cheapconstlist=Non
 
 
 def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
-                  cheapconstlist=None, pool=None):
+                  cheapconstlist=None, pool=None, mode='tiny'):
     """
     Calculate the multi objective acquisition function value
 
@@ -489,7 +512,11 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
         metric = acqufunhandle(x, ypar, moboInfo, kriglist)
 
     fx = pof * coeff * metric
-
+    if x.ndim == 1:
+        if np.isnan(fx):
+            fx = np.inf
+    else:
+        fx[np.isnan(fx)] = np.inf
     return fx
 
 
