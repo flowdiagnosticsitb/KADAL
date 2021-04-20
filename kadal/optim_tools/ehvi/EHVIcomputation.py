@@ -1,6 +1,7 @@
 import numpy as np
 import multiprocessing as mp
 from kadal.optim_tools.ehvi.exi2d import exi2d
+from kadal.extern.HDYE_3D_Update import kmac
 
 
 def ehvicalc(x,ypar,moboInfo,kriglist):
@@ -32,7 +33,6 @@ def EHVI(x,ypar,moboInfo,kriglist):
             - BayesMultiInfo: Structure(Dictionary) containing necessary information for multiobjective Bayesian optimization.
             - kriglist (list): List containing Kriging instances.
         """
-
     X = kriglist[0].KrigInfo["X"]
     nobj = len(kriglist)
     nsamp = np.size(X, 0)
@@ -54,7 +54,68 @@ def EHVI(x,ypar,moboInfo,kriglist):
     return HV
 
 
-def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None, mode='tiny'):
+def pool_predict(pool, x, kriglist):
+    """Helper function for multiprocessing Kriging.predict().
+
+    N.B. Might want to inline this later once everything else
+    is optimised.
+
+    Args:
+        pool (mp.Pool): A multiprocessing pool instance.
+        x (np.ndarray): [n_pop, n_dv] Design variables for a population.
+        kriglist ([kriging_model.Kriging]): n_obj-len list of objective
+            Kriging instances.
+
+    Returns:
+        pred (np.ndarray): [n_pop, n_obj] predicted mean vectors.
+        SSqr (np.ndarray): [n_pop, n_obj] mean vector standard
+            deviations.
+    """
+    n_pop = x.shape[0]
+    n_obj = len(kriglist)
+    pred = np.zeros([n_pop, n_obj])
+    SSqr = np.zeros([n_pop, n_obj])
+
+    # Set up predict loop args
+    p_args = [(x[i, :], ["pred", "SSqr"]) for i in range(n_pop)]
+    # Run for all population for each Kriging
+    for j in range(n_obj):
+        res_p = pool.starmap(kriglist[j].predict, p_args)
+        res_p = np.array(res_p).ravel().reshape(n_pop, 2)
+        pred[:, j] = res_p[:, 0].copy()
+        SSqr[:, j] = res_p[:, 1].copy()
+
+    return pred, SSqr
+
+
+def pool_hv_exi2d(pool, x, kriglist, y_par, ref_point):
+    """Helper function for multiprocessing exi2d.
+
+    Args:
+        pool (mp.Pool): A multiprocessing pool instance.
+        x (np.ndarray): [n_pop, n_dv] Design variables for a population.
+        kriglist ([kriging_model.Kriging]): n_obj-len list of objective
+            Kriging instances.
+        y_par (np.ndarray): [n_par, n_obj] Current Pareto front.
+        ref_point  (np.ndarray): n_obj-len array indicating the
+            reference point location.
+
+    Returns:
+        hv (np.ndarray): n_pop-len array of hypervolumes for each samp.
+    """
+    n_pop = x.shape[0]
+    hv = np.zeros(n_pop)
+
+    pred, SSqr = pool_predict(pool, x, kriglist)
+
+    # Set up exi2d loop args and pass to pool
+    hv_args = ((y_par, ref_point, pred[i, :], SSqr[i, :]) for i in range(n_pop))
+    hv[:] = pool.starmap(exi2d, hv_args)
+    hv *= -1
+    return hv
+
+
+def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
     """Vectorised EHVI Function
 
     Vectorises above EHVI function as much as possible. Currently,
@@ -68,15 +129,12 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None, mode='tiny'):
         x (np.ndarray): [n_pop, n_dv] Design variables for a population.
         y_par (np.ndarray): [n_par, n_obj] Current Pareto front.
         moboInfo (dict): Structure containing necessary information for
-            multiobjective Bayesian optimization.
-        kriglist ([]): n_obj-len list of objective Kriging instances.
+            multi-objective Bayesian optimization.
+        kriglist ([kriging_model.Kriging]): n_obj-len list of objective
+            Kriging instances.
         pool (mp.Pool, optional): An existing mp.Pool instance can be
             specified to reduce the overhead of starting a new mp.Pool
             with every iteration.
-        mode (None/str, optional): None, 'tiny' (default), or 'inf'.
-            For zero HV solutions, None does nothing, 'tiny' replaces
-            zeros with np.finfo("float").tiny, and 'inf' replaces zeros
-            with np.inf.
 
     Returns:
         hv (np.ndarray/float): n_pop-len array of hypervolumes for each
@@ -90,15 +148,17 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None, mode='tiny'):
         x = x.reshape(1, -1)
 
     n_pop = x.shape[0]
-    # X = kriglist[0].KrigInfo["X"]
     n_obj = len(kriglist)
+    if n_obj != 2:
+        print('### WARNING: ehvical_vec is only valid to 2-objective EHVI! '
+              'Use ehvicalc_kmac3d for vectorised 3D EHVI using Leiden KMAC.')
     ref_point = moboInfo["refpoint"]
 
-    pred = np.zeros([n_pop, n_obj])
-    SSqr = np.zeros([n_pop, n_obj])
-    hv = np.zeros(n_pop)
+    if pool is None:
+        pred = np.zeros([n_pop, n_obj])
+        SSqr = np.zeros([n_pop, n_obj])
+        hv = np.zeros(n_pop)
 
-    if moboInfo.get('n_cpu', 1) == 1 or pool is not None:
         # Prediction of each objective
         # Looks like prediction.py prediction is only set up for 1D arrays...
         for i in range(n_pop):
@@ -107,58 +167,69 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None, mode='tiny'):
                                                              ["pred", "SSqr"])
 
         # Compute (negative of) hypervolume
-        # exi2d not easy to vectorise - just pass to mp.Pool.starmap
         for i in range(n_pop):
             hv[i] = -1 * exi2d(y_par, ref_point, pred[i, :], SSqr[i, :])
 
     else:
-        def pool_hv():
-            # Set up predict loop args
-            p_args = [(x[i, :], ["pred", "SSqr"]) for i in range(n_pop)]
-            # Run for all population for each Kriging
+        # Parallelise serial evaluations with mp.Pool
+        hv = pool_hv_exi2d(pool, x, kriglist, y_par, ref_point)
+
+    # If 1D input, expects float output (legacy behaviour)
+    if reshape:
+        hv = hv[0]
+
+    return hv
+
+
+def ehvicalc_kmac3d(x, y_par, moboInfo, kriglist, pool=None):
+    """Calculate EHVI using Leiden Uni's KMAC c++ code.
+
+    Uses the multi 'sliceupdate' mode.
+
+    Args:
+        x (np.ndarray): [n_pop, n_dv] Design variables for a population.
+        y_par (np.ndarray): [n_par, n_obj] Current Pareto front.
+        moboInfo (dict): Structure containing necessary information for
+            multiobjective Bayesian optimization.
+        kriglist ([kriging_model.Kriging]): n_obj-len list of objective
+            Kriging instances.
+        pool (mp.Pool, optional): An existing mp.Pool instance can be
+            specified to reduce the overhead of starting a new mp.Pool
+            with every iteration.
+
+    Returns:
+        hv (np.ndarray/float): n_pop-len array of hypervolumes for each
+            samp, if input x is 2D. If input x is a 1D input array,
+            n_pop = 1 is assumed and all inputs are design variables;
+            a single hv float is returned (legacy behaviour).
+        """
+    reshape = False
+    if x.ndim == 1:
+        reshape = True
+        x = x.reshape(1, -1)
+
+    n_pop = x.shape[0]
+    n_obj = len(kriglist)
+    if n_obj != 3:
+        raise ValueError('ehvicalc_kmac3d can only be used with 3-objectives.')
+    ref_point = moboInfo["refpoint"]
+
+    hv = np.zeros(n_pop)
+
+    if pool is None:
+        pred = np.zeros([n_pop, n_obj])
+        SSqr = np.zeros([n_pop, n_obj])
+        # Prediction of each objective
+        for i in range(n_pop):
             for j in range(n_obj):
-                res_p = pool.starmap(kriglist[j].predict, p_args)
-                res_p = np.array(res_p).ravel().reshape(n_pop, 2)
-                pred[:, j] = res_p[:, 0].copy()
-                SSqr[:, j] = res_p[:, 1].copy()
+                pred[i, j], SSqr[i, j] = kriglist[j].predict(x[i, :], ["pred", "SSqr"])
 
-            # Set up exi2d loop args
-            hv_args = ((y_par, ref_point, pred[i, :], SSqr[i, :]) for i in range(n_pop))
-            nonlocal hv
-            hv[:] = pool.starmap(exi2d, hv_args)
-            hv *= -1
-
-        # Run each serial loop evaluation in parallel with mp.Pool
-        # If a pool is provided, use it, else create a new one
-        if pool is None:
-            pool = mp.Pool(processes=moboInfo['n_cpu'])
-            exit_pool = True
-        else:
-            exit_pool = False
-
-        try:
-            pool_hv()
-        finally:
-            # Close pool if created here
-            if exit_pool:
-                pool.close()
-                pool.join()
-
-    if mode == 'tiny':
-        # give penalty to HV, to avoid error in CMA-ES when in an iteration produce all HV = 0
-        z = hv == 0  # mask of values = 0
-        rng = np.random.default_rng()
-        hv[z] = rng.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100,
-                            size=np.count_nonzero(z))
-    elif mode == 'inf':
-        # Scipy differential evolution does not like tiny values near zero
-        # https://github.com/scipy/scipy/issues/13784
-        z = hv == 0  # mask of values = 0
-        hv[z] = np.inf
-    elif mode is None:
-        pass
     else:
-        raise ValueError("mode flag must be set to 'tiny', 'inf', or None")
+        pred, SSqr = pool_predict(pool, x, kriglist)
+
+    # Invert inputs as KMAC expects maximisation - can do multiple inputs at once
+    # Compute (negative of) hypervolume using KMAC C++ code from Leiden Uni
+    hv[:] = -kmac.ehvi3d_sliceupdate(-y_par, -ref_point, -pred, SSqr)
 
     # If 1D input, expects float output (legacy behaviour)
     if reshape:

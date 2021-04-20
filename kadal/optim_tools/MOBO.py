@@ -1,6 +1,7 @@
 import numpy as np
 from copy import deepcopy
 import scipy.io as sio
+import multiprocessing as mp
 from kadal.testcase.analyticalfcn.cases import evaluate
 from kadal.surrogate_models.kriging_model import Kriging
 from kadal.optim_tools import searchpareto
@@ -100,8 +101,14 @@ class MOBO:
             pass
 
         # Perform update on design space
-        if self.moboInfo['acquifunc'].lower() in ('ehvi', 'ehvi_vec'):
+        if self.moboInfo['acquifunc'].lower() in ('ehvi', 'ehvi_vec', 'ehvi_kmac3d'):
+            # Start pool at this level if no pool and n_cpu > 1
             self.ehviupdate(disp)
+            # if self.moboInfo.get('n_cpu', 1) == 1:
+            #     self.ehviupdate(disp)
+            # else:
+            #     with mp.Pool(processes=self.moboInfo['n_cpu']) as pool:
+            #         self.ehviupdate(disp, pool=pool)
         elif self.moboInfo['acquifunc'].lower() == 'parego':
             self.paregoupdate(disp)
         else:
@@ -124,7 +131,7 @@ class MOBO:
         return xupdate,yupdate,supdate,metricall
 
 
-    def ehviupdate(self, disp):
+    def ehviupdate(self, disp, pool=None):
         """
         Update MOBO using EHVI algorithm.
 
@@ -152,7 +159,7 @@ class MOBO:
                 for ii,krigobj in enumerate(self.kriglist):
                     yprednext[ii], sprednext[ii] = krigobj.predict(xnext,['pred','s'])
             else:
-                xnext, yprednext, sprednext, metricnext = self.simultpredehvi(disp)
+                xnext, yprednext, sprednext, metricnext = self.simultpredehvi(disp=disp, pool=pool)
 
             if self.nup == 0:
                 self.metricall = metricnext
@@ -227,9 +234,13 @@ class MOBO:
                       f"Maximum no. updates: {self.moboInfo['nup']+1}")
 
 
-    def simultpredehvi(self,disp=False):
+    def simultpredehvi(self, disp=False, pool=None):
         """
         Perform multi updates on EHVI MOBO using Kriging believer method.
+
+        Args:
+            disp (bool, optional): Print updates. Defaults to False.
+            pool (mp.Pool, optional): An existing mp.Pool instance.
 
         Returns:
              xalltemp (nparray) : Array of design variables updates.
@@ -252,8 +263,11 @@ class MOBO:
             else:
                 pass
 
-            xnext, metrictemp = run_multi_opt(krigtemp, self.moboInfo, ypartemp, self.krigconstlist,
-                                              self.cheapconstlist)
+            xnext, metrictemp = run_multi_opt(krigtemp, self.moboInfo,
+                                              ypartemp,
+                                              krigconstlist=self.krigconstlist,
+                                              cheapconstlist=self.cheapconstlist,
+                                              pool=pool)
             bound = np.vstack((- np.ones(shape=[1, krigtemp[0].KrigInfo["nvar"]]),
                                np.ones(shape=[1, krigtemp[0].KrigInfo["nvar"]])))
 
@@ -436,14 +450,14 @@ def moboinfocheck(moboInfo, autoupdate):
         moboInfo["acquifunc"] = "EHVI"
         print("The acquisition function is not specified, set to EHVI")
     else:
-        availacqfun = ["ehvi", "ehvi_vec", "parego"]
+        availacqfun = ["ehvi", "ehvi_vec", "ehvi_kmac3d", "parego"]
         if moboInfo["acquifunc"].lower() not in availacqfun:
             raise ValueError(moboInfo["acquifunc"], " is not a valid acquisition function.")
         else:
             pass
 
     # Set necessary params for multiobjective acquisition function
-    if moboInfo["acquifunc"].lower() in ("ehvi", "ehvi_vec"):
+    if moboInfo["acquifunc"].lower() in ("ehvi", "ehvi_vec", "ehvi_kmac3d"):
         if "refpoint" not in moboInfo:
             moboInfo["refpointtype"] = 'dynamic'
         else:

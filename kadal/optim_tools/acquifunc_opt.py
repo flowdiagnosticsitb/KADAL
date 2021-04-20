@@ -3,46 +3,80 @@ import numpy as np
 import multiprocessing as mp
 from kadal.misc.sampling.samplingplan import realval
 from scipy.optimize import minimize, fmin_cobyla, differential_evolution
-from scipy.optimize._differentialevolution import DifferentialEvolutionSolver
-from kadal.optim_tools.ehvi.EHVIcomputation import ehvicalc, ehvicalc_vec
+from kadal.optim_tools.ehvi.EHVIcomputation import ehvicalc, ehvicalc_vec, ehvicalc_kmac3d
 from kadal.optim_tools.ga.uncGA import uncGA, uncGA_vec, uncGA2
 import cma
 
 
-def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None):
+def print_res(r_t, metric, x, success=None, msg=None, n_eval=None,
+              n_gen=None, i_restart=None, n_restart=None):
+    """Helper function to print iteration loop updates"""
+    restart = f'Restart {i_restart + 1} of {n_restart} done, ' if i_restart else ''
+    evals = f'{n_eval} func evals, ' if n_eval else ''
+    gens = f'{n_gen} generations, ' if n_gen else ''
+    msg = f' - {msg}' if msg is not None else ''
+    loop_time = int(time.time() - r_t)
+    conv = f'\nConverged: {success}{msg}' if success is not None else ''
+    print(f'metric: {metric}, x: {x}')
+    print(f'{restart}'
+          f'{evals}{gens}{loop_time} s'
+          f'{conv}')
+
+
+def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
+                   pool=None):
     """
-   Run the optimization of multi-objective acquisition function to find the next sampling point.
+    Optimize the single-objective acquisition function to find the next
+    sampling point.
 
-   Args:
-     krigobj (object): Kriging object.
-     soboInfo (dict): A structure containing necessary information for Bayesian optimization.
-     krigconstlist (list): List of Kriging object for constraints. Defaults to None.
-     cheapconstlist (list): List of constraints function. Defaults to None.
-            Expected output of the constraint functions is 1 if the constraint is satisfied and 0 if not.
-            The constraint functions MUST have an input of x (the decision variable to be evaluated)
+    The available optimizers for the acquisition functions are:
+        'cmaes', 'lbfgsb', 'diff_evo', 'cobyla'
 
-   Returns:
-     xnext (nparray): Suggested next sampling point as discovered by the optimization of the acquisition function
-     fnext (nparray): Optimized acquisition function
+    Note that this function runs for both unconstrained and constrained
+    single-objective Bayesian optimization.
 
-   The available optimizers for the acquisition function are 'cmaes', 'lbfgsb', 'cobyla'.
-   Note that this function runs for both unconstrained and constrained single-objective Bayesian optimization.
-   """
+    Args:
+        krigobj (kriging_model.Kriging): Objective Kriging instance.
+        soboInfo (dict): A structure containing necessary information for
+            Bayesian optimization.
+        krigconstlist ([kriging_model.Kriging], optional): Kriging
+            instances for constraints. Defaults to None.
+        cheapconstlist ([func], optional): Constraint functions.
+            Defaults to None. Expected output of the constraint
+            functions is 1 if satisfied and 0 if not.
+            The constraint functions MUST have an input of x (the
+            decision variable to be evaluated).
+        pool (mp.Pool, optional): An existing mp.Pool instance can be
+            specified and passed to solvers/acquisition functions for
+            multiprocessing, if supported. Default is None.
+    Returns:
+        xnext (np.ndarray): n_dv-len array of suggested next sampling
+            point as discovered by the optimization of the acquisition
+            function.
+        fnext (np.ndarray): n_obj-len array of  optimized acquisition
+            function fitness metrics.
+    """
     acquifuncopt = soboInfo["acquifuncopt"]
     acquifunc = soboInfo["acquifunc"]
 
     if acquifunc.lower() == 'parego':
         acquifunc = soboInfo['paregoacquifunc']
     else:
-        pass
+        msg = "Only soboInfo['acquifunc'] = 'parego' is currently handled"
+        raise NotImplementedError(msg)
 
+    n_restart = soboInfo["nrestart"]
+    n_var = krigobj.KrigInfo["nvar"]
+
+    low_bound = krigobj.KrigInfo["lb"]
+    up_bound = krigobj.KrigInfo["ub"]
     if acquifuncopt.lower() == 'cmaes':
-        Xrand = realval(krigobj.KrigInfo["lb"], krigobj.KrigInfo["ub"],
-                        np.random.rand(soboInfo["nrestart"], krigobj.KrigInfo["nvar"]))
-        xnextcand = np.zeros(shape=[soboInfo["nrestart"], krigobj.KrigInfo["nvar"]])
-        fnextcand = np.zeros(shape=[soboInfo["nrestart"]])
+        Xrand = realval(low_bound, up_bound,
+                        np.random.rand(n_restart, n_var))
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
         sigmacmaes = 1  # np.mean((KrigNewMultiInfo["ub"] - KrigNewMultiInfo["lb"]) / 6)
-        for im in range(0, soboInfo["nrestart"]):
+        for im in range(0, n_restart):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
                 xnextcand[im, :], es = cma.fmin2(krigobj.predict, Xrand[im, :], sigmacmaes,
                                                  {'verb_disp': 0,'verbose': -9},
@@ -58,12 +92,12 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None):
         fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'lbfgsb':
-        Xrand = realval(krigobj.KrigInfo["lb"], krigobj.KrigInfo["ub"],
-                        np.random.rand(soboInfo["nrestart"], krigobj.KrigInfo["nvar"]))
-        xnextcand = np.zeros(shape=[soboInfo["nrestart"], krigobj.KrigInfo["nvar"]])
-        fnextcand = np.zeros(shape=[soboInfo["nrestart"]])
-        lbfgsbbound = np.hstack((krigobj.KrigInfo["lb"].reshape(-1, 1), krigobj.KrigInfo["ub"].reshape(-1, 1)))
-        for im in range(0,soboInfo["nrestart"]):
+        Xrand = realval(low_bound, up_bound,
+                        np.random.rand(n_restart, n_var))
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
+        lbfgsbbound = np.hstack((low_bound.reshape(-1, 1), up_bound.reshape(-1, 1)))
+        for im in range(0, n_restart):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
                 res = minimize(krigobj.predict,Xrand[im,:] ,method='L-BFGS-B', bounds=lbfgsbbound, args=(acquifunc))
                 xnextcand[im,:] = res.x
@@ -78,33 +112,56 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None):
         fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'diff_evo':
-        xnextcand = np.zeros(shape=[soboInfo["nrestart"], krigobj.KrigInfo["nvar"]])
-        fnextcand = np.zeros(shape=[soboInfo["nrestart"]])
-        optimbound = np.hstack((krigobj.KrigInfo["lb"].reshape(-1, 1), krigobj.KrigInfo["ub"].reshape(-1, 1)))
-        for im in range(0, soboInfo["nrestart"]):
-            if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
-                res = differential_evolution(krigobj.predict, optimbound, args=(acquifunc,))
-                xnextcand[im, :] = res.x
-                fnextcand[im] = res.fun
-            else:
-                res = differential_evolution(singleconstfun, optimbound,
-                                             args=(krigobj, acquifunc, krigconstlist,cheapconstlist))
-                xnextcand[im, :] = res.x
-                fnextcand[im] = res.fun
+        if 'de_kwargs' in soboInfo:
+            de_kwargs = soboInfo['de_kwargs']
+        else:
+            de_kwargs = {}
+
+        de_kwargs['init'] = de_kwargs.get('init', 'latinhypercube')
+
+        optimbound = list(zip(low_bound, up_bound))
+        de_args = (singleconstfun, optimbound)
+        if 'constraints' in de_kwargs:
+            cheapconstlist = None  # DE handles cheap constraint functions directly
+        args = (krigobj, acquifunc, krigconstlist, cheapconstlist, None, 'inf')
+        de_kwargs['args'] = args
+
+        # Start pool at this level if no pool and n_cpu > 1
+        if pool is not None:
+            workers = pool.map
+            # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
+            soboInfo['n_cpu'] = 1
+        else:
+            workers = 1  # Default DE flag
+
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
+
+        for im in range(n_restart):
+            r_t = time.time()
+
+            res = differential_evolution(*de_args, **de_kwargs, workers=workers)
+
+            xnextcand[im, :] = res.x
+            fnextcand[im] = res.fun
+            print_res(r_t, res.fun, res.x, success=res.success, msg=res.message,
+                      n_eval=res.nfev, n_gen=res.nit, i_restart=im,
+                      n_restart=n_restart)
+
         I = np.argmin(fnextcand)
         xnext = xnextcand[I, :]
         fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'cobyla':
-        Xrand = realval(krigobj.KrigInfo["lb"], krigobj.KrigInfo["ub"],
-                        np.random.rand(soboInfo["nrestart"], krigobj.KrigInfo["nvar"]))
-        xnextcand = np.zeros(shape=[soboInfo["nrestart"], krigobj.KrigInfo["nvar"]])
-        fnextcand = np.zeros(shape=[soboInfo["nrestart"]])
+        Xrand = realval(low_bound, up_bound,
+                        np.random.rand(n_restart, n_var))
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
         optimbound = []
-        for i in range(len(krigobj.KrigInfo["ub"])):
+        for i in range(len(up_bound)):
             optimbound.append(lambda x, krigobj, aa, bb, cc, itemp=i: x[itemp] - krigobj.KrigInfo["lb"][itemp])
             optimbound.append(lambda x, krigobj, aa, bb, cc, itemp=i: krigobj.KrigInfo["ub"][itemp] - x[itemp])
-        for im in range(0, soboInfo["nrestart"]):
+        for im in range(0, n_restart):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
                 res = fmin_cobyla(krigobj.predict, Xrand[im,:], optimbound,
                                   rhobeg=0.5, rhoend=1e-4, args=(acquifunc))
@@ -122,25 +179,42 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None):
     return (xnext,fnext)
 
 
-def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=None):
+def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
+                  cheapconstlist=None, pool=None):
     """
-    Run the optimization of multi-objective acquisition function to find the next sampling point.
+    Optimize the multi-objective acquisition function to find the next
+    sampling point.
+
+    The available optimizers for the acquisition functions are:
+        'ga', 'diff_evo', 'cmaes', 'lbfgsb', 'cobyla'
+
+    Note that this function runs for both unconstrained and constrained
+    multi-objective Bayesian optimization.
 
     Args:
-      kriglist (list): A list containing Kriging instances.
-      moboInfo (dict): A structure containing necessary information for Bayesian optimization.
-      ypar (nparray): Array contains the current non-dominated solutions.
-      krigconstlist (list): List of Kriging object for constraints. Defaults to None.
-      cheapconstlist (list): List of constraints function. Defaults to None.
-            Expected output of the constraint functions is 1 if the constraint is satisfied and 0 if not.
-            The constraint functions MUST have an input of x (the decision variable to be evaluated)
+        kriglist ([kriging_model.Kriging]): n_obj-len list of objective
+            Kriging instances.
+        moboInfo (dict): A structure containing necessary information
+            for Bayesian optimization.
+        ypar (np.ndarray): [n_par, n_obj] Current Pareto front
+            solutions.
+        krigconstlist ([kriging_model.Kriging], optional): Kriging
+            instances for constraints. Defaults to None.
+        cheapconstlist ([func], optional): Constraint functions.
+            Defaults to None. Expected output of the constraint
+            functions is 1 if satisfied and 0 if not.
+            The constraint functions MUST have an input of x (the
+            decision variable to be evaluated).
+        pool (mp.Pool, optional): An existing mp.Pool instance can be
+            specified and passed to solvers/acquisition functions for
+            multiprocessing, if supported. Default is None.
 
     Returns:
-      xnext (nparray): Suggested next sampling point as discovered by the optimization of the acquisition function
-      fnext (nparray): Optimized acquisition function
-
-    The available optimizers for the acquisition function are 'cmaes', 'lbfgsb', 'cobyla'.
-    Note that this function runs for both unconstrained and constrained single-objective Bayesian optimization.
+        xnext (np.ndarray): n_dv-len array of suggested next sampling
+            point as discovered by the optimization of the acquisition
+            function.
+        fnext (np.ndarray): n_obj-len array of  optimized acquisition
+            function fitness metrics.
     """
     acquifuncopt = moboInfo["acquifuncopt"]
     acquifunc = moboInfo["acquifunc"]
@@ -149,16 +223,23 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
         acqufunhandle = ehvicalc
     elif acquifunc.lower() == 'ehvi_vec':
         acqufunhandle = ehvicalc_vec
+    elif acquifunc.lower() == 'ehvi_kmac3d':
+        acqufunhandle = ehvicalc_kmac3d
     else:
-        raise ValueError("Acquisition function handle is not available")
+        raise ValueError(f"Acquisition function handle {acquifunc} is not available")
+
+    n_restart = moboInfo["nrestart"]
+    n_var = kriglist[0].KrigInfo["nvar"]
+    low_bound = kriglist[0].KrigInfo["lb"]
+    up_bound = kriglist[0].KrigInfo["ub"]
 
     if acquifuncopt.lower() == 'cmaes':
-        Xrand = realval(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"],
-                        np.random.rand(moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]))
-        xnextcand = np.zeros(shape=[moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]])
-        fnextcand = np.zeros(shape=[moboInfo["nrestart"]])
+        Xrand = realval(low_bound, up_bound,
+                        np.random.rand(n_restart, n_var))
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
         sigmacmaes = 1  # np.mean((KrigNewMultiInfo["ub"] - KrigNewMultiInfo["lb"]) / 6)
-        for im in range(0, moboInfo["nrestart"]):
+        for im in range(0, n_restart):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
                 xnextcand[im, :], es = cma.fmin2(acqufunhandle, Xrand[im, :], sigmacmaes,
                                                  {'verb_disp': 0, 'verbose': -9},
@@ -174,62 +255,45 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
         fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'ga':
-        if moboInfo['nrestart'] != 1:
-            print(f"'nrestart' ignored for 'acquifuncopt': '{acquifuncopt}'")
+        # Load SciPy DE settings from de_kwargs dict
+        if 'ga_kwargs' in moboInfo:
+            ga_kwargs = moboInfo['ga_kwargs']
+        else:
+            ga_kwargs = {}
 
-        templst = []
+        # TODO Redefine 'ehvisampling' to pass in n_pop and std_scale too - maybe dict?
         if moboInfo['ehvisampling'] == 'efficient':
-            for ij in range(np.size(ypar, 0)):
-                idx = np.where((kriglist[0].KrigInfo["y"] == ypar[ij, 0]) &
-                               (kriglist[1].KrigInfo["y"] == ypar[ij, 1]))[0][0]
-                templst.append(idx)
-
-            init_seed = kriglist[0].KrigInfo["X_norm"][templst, :] / 2 + 0.5
+            init_seed = efficientsamp(kriglist, ypar)
         else:
             init_seed = None
 
-        if krigconstlist is None and cheapconstlist is None:
-            # print('####### GA1')
-            # xnext, fnext, _ = uncGA(acqufunhandle, lb=kriglist[0].KrigInfo["lb"], ub=kriglist[0].KrigInfo["ub"],
-            #                         args=(ypar, moboInfo, kriglist), initialization=init_seed)
-            func = acqufunhandle
-            args = (ypar, moboInfo, kriglist)
-            # xnext, fnext, _ = uncGA_vec(acqufunhandle,
-            #                             lb=kriglist[0].KrigInfo["lb"],
-            #                             ub=kriglist[0].KrigInfo["ub"],
-            #                             args=(ypar, kriglist, moboInfo,
-            #                                   krigconstlist, cheapconstlist),
-            #                             initialization=init_seed, pool=pool)
-        else:
-            # print('####### GA2')
-            # xnext, fnext, _ = uncGA(multiconstfun, lb=kriglist[0].KrigInfo["lb"], ub=kriglist[0].KrigInfo["ub"],
-            #                         args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist),
-            #                         initialization=init_seed)
-            func = multiconstfun
-            args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist)
+        func = multiconstfun
+        args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist)
 
-        # Start pool before GA so no time wasting creating new pools
-        if moboInfo.get('n_cpu', 1) == 1:
-            xnext, fnext, _ = uncGA2(func,
-                                     lb=kriglist[0].KrigInfo["lb"],
-                                     ub=kriglist[0].KrigInfo["ub"],
-                                     args=args,
-                                     initialization=init_seed)
-        else:
-            with mp.Pool(processes=moboInfo['n_cpu']) as pool:
-                xnext, fnext, _ = uncGA2(func,
-                                         lb=kriglist[0].KrigInfo["lb"],
-                                         ub=kriglist[0].KrigInfo["ub"],
-                                         args=args,
-                                         initialization=init_seed, pool=pool)
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
+
+        for im in range(n_restart):
+            r_t = time.time()
+            x, metric, _ = uncGA2(func, lb=low_bound, ub=up_bound, args=args,
+                                  **ga_kwargs, initialization=init_seed, pool=pool)
+
+            xnextcand[im, :] = x
+            fnextcand[im] = metric
+            # TODO: Fill more outputs - maybe have a general results class like SciPY results object
+            print_res(r_t, metric, x, n_gen=_[-1, 0], i_restart=im, n_restart=n_restart)
+
+        I = np.argmin(fnextcand)
+        xnext = xnextcand[I, :]
+        fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'lbfgsb':
-        Xrand = realval(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"],
-                        np.random.rand(moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]))
-        xnextcand = np.zeros(shape=[moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]])
-        fnextcand = np.zeros(shape=[moboInfo["nrestart"]])
-        lbfgsbbound = np.hstack((kriglist[0].KrigInfo["lb"].reshape(-1, 1), kriglist[0].KrigInfo["ub"].reshape(-1, 1)))
-        for im in range(0,moboInfo["nrestart"]):
+        Xrand = realval(low_bound, up_bound,
+                        np.random.rand(n_restart, n_var))
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
+        lbfgsbbound = np.hstack((low_bound.reshape(-1, 1), up_bound.reshape(-1, 1)))
+        for im in range(0, n_restart):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
                 res = minimize(acqufunhandle,Xrand[im,:],method='L-BFGS-B',bounds=lbfgsbbound,args=(ypar,moboInfo,
                                                                                                     kriglist))
@@ -245,117 +309,77 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
         fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'diff_evo':
-
+        # Load SciPy DE settings from de_kwargs dict
         if 'de_kwargs' in moboInfo:
-            kwargs = moboInfo['de_kwargs']
+            de_kwargs = moboInfo['de_kwargs']
         else:
-            kwargs = {}
+            de_kwargs = {}
 
+        # Set ENDS or DE sample init, if specified, default to latinhypercube
         if moboInfo['ehvisampling'] == 'efficient':
-            n_pop_factor = kwargs.get('popsize', 10)
-            n_var = kriglist[0].KrigInfo["nvar"]
+            n_pop_factor = de_kwargs.get('popsize', 10)
+            n_var = n_var
             n_pop = n_var * n_pop_factor
-            init_seed = efficientsamp(kriglist, ypar, npop=n_pop)
+            de_kwargs['init'] = efficientsamp(kriglist, ypar, n_pop=n_pop)
         else:
-            init_seed = 'latinhypercube'
+            de_kwargs['init'] = de_kwargs.get('init', 'latinhypercube')
 
-        # optimbound = np.hstack((kriglist[0].KrigInfo["lb"].reshape(-1, 1), kriglist[0].KrigInfo["ub"].reshape(-1, 1)))
-        optimbound = list(zip(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"]))
+        optimbound = list(zip(low_bound, up_bound))
+        de_args = (multiconstfun, optimbound)
+        if 'constraints' in de_kwargs:
+            cheapconstlist = None  # DE handles cheap constraint functions directly
+        # Can't pass pool to acqufunc (child process)
+        args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist, None, 'inf')
+        de_kwargs['args'] = args
 
-        if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
-            func = acqufunhandle
-            args = (ypar, moboInfo, kriglist)
-            breakpoint()  # test how to pass mode='inf'
-            # res = differential_evolution(acqufunhandle, optimbound, init=init_seed, args=(ypar,moboInfo,kriglist))
-
+        # Start pool at this level if no pool and n_cpu > 1
+        if '_n_cpu' not in moboInfo:
+            # Only for the first restart, set for later restarts
+            moboInfo['_n_cpu'] = moboInfo.get('n_cpu', 1)
+        if moboInfo.get('_n_cpu', 1) == 1:
+            pool = None
         else:
-            func = multiconstfun
-            args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist, None, 'inf')
-            # res = differential_evolution(multiconstfun, optimbound, init=init_seed, args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist))
+            pool = mp.Pool(processes=moboInfo['_n_cpu'])
 
-        if '_n_cpu' in moboInfo:
-            # Set from previous KB cycle
-            pass
-        elif moboInfo.get('n_cpu', 1) == 1:
-            moboInfo['_n_cpu'] = 1
-        else:
-            # Set n_cpu to 1 to stop pool in EHVI - pool set up by scipy for DE
-            moboInfo['_n_cpu'] = moboInfo['n_cpu']
+        if pool is not None:
+            workers = pool.map
+            # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
             moboInfo['n_cpu'] = 1
+        else:
+            workers = 1  # Default DE flag
 
-        xnextcand = np.zeros(shape=[moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]])
-        fnextcand = np.zeros(shape=[moboInfo["nrestart"]])
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
 
-        # Start pool before GA so no time wasting creating new pools
-        de_args = (func, optimbound)
-        de_kwargs = {'init': init_seed, 'args': args, **kwargs}
-
-        for im in range(moboInfo["nrestart"]):
+        for im in range(n_restart):
             r_t = time.time()
 
-            if moboInfo.get('_n_cpu', 1) == 1:
-                res = differential_evolution(*de_args, **de_kwargs)
-            else:
-                with mp.Pool(processes=moboInfo['_n_cpu']) as pool:
-                    res = differential_evolution(*de_args, **de_kwargs,
-                                                 workers=pool.map)
-            xnext = res.x
-            fnext = res.fun
-            i = res.nfev
-            xnextcand[im, :] = xnext
-            fnextcand[im] = fnext
-            print(f'fitness: {fnext}, x: {xnext}')
-            print(f'Restart {im + 1} of {moboInfo["nrestart"]} done, '
-                  f'{i} func evals, {int(time.time() - r_t)} s')
+            res = differential_evolution(*de_args, **de_kwargs, workers=workers)
 
-        # # Manual convergence manger...
-        # for im in range(moboInfo["nrestart"]):
-        #     r_t = time.time()
-        #     with DifferentialEvolutionSolver(func, optimbound, init=init_seed,
-        #                                      args=args, workers=moboInfo['_n_cpu'],
-        #                                      **kwargs) as de_solver:
-        #         f_old = 0
-        #         i = 0
-        #         fit_err = np.nan
-        #         tol = kwargs.get('tol', 1e-2)
-        #         while i < 40 or fit_err >= tol:
-        #             t_start = time.time()
-        #             xnext, fnext = de_solver.next()
-        #             xnextcand[im,:] = xnext
-        #             fnextcand[im] = fnext
-        #             # seems like de is replacing tiny number with zero, breaking convergence
-        #             if fnext == 0:
-        #                 # Set a tiny number so at least we don't get nans in fit_err
-        #                 # If a nan, the first non-nan number causes lage jump over tol
-        #                 fnext = np.random.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100)
-        #
-        #             fit_err = 100 * np.abs(fnext - f_old) / fnext
-        #             f_old = fnext
-        #
-        #             # print(f'{i} fit_err: {fit_err}, xnext: {xnext}, fnext: '
-        #             #       f'{fnext}, time: {int(time.time()-t_start)} s')
-        #             i += 1
-        #             if i > 200:
-        #                 print('Hit max generations.')
-        #                 break
-        #     print(f'fitness: {fnext}, x: {xnext}')
-        #     print(f'Restart {im + 1} of {moboInfo["nrestart"]} done, '
-        #           f'{i} generations, {int(time.time() - r_t)} s')
+            xnextcand[im, :] = res.x
+            fnextcand[im] = res.fun
+            print_res(r_t, res.fun, res.x, success=res.success, msg=res.message,
+                      n_eval=res.nfev, n_gen=res.nit, i_restart=im,
+                      n_restart=n_restart)
 
         I = np.argmin(fnextcand)
         xnext = xnextcand[I, :]
         fnext = fnextcand[I]
 
+        if pool is not None:
+            pool.close()
+            pool.join()
+
     elif acquifuncopt.lower() == 'cobyla':
-        Xrand = realval(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"],
-                        np.random.rand(moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]))
-        xnextcand = np.zeros(shape=[moboInfo["nrestart"], kriglist[0].KrigInfo["nvar"]])
-        fnextcand = np.zeros(shape=[moboInfo["nrestart"]])
+        Xrand = realval(low_bound, up_bound,
+                        np.random.rand(n_restart, n_var))
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
         optimbound = []
-        for i in range(len(kriglist[0].KrigInfo["ub"])):
+        for i in range(len(up_bound)):
             optimbound.append(lambda x, cc, kriglist, dd, aa, bb, itemp=i: x[itemp] - kriglist[0].KrigInfo["lb"][itemp])
             optimbound.append(lambda x, cc, kriglist, dd, aa, bb, itemp=i: kriglist[0].KrigInfo["ub"][itemp] - x[itemp])
-        for im in range(0, moboInfo["nrestart"]):
+        for im in range(0, n_restart):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
                 res = fmin_cobyla(acqufunhandle, Xrand[im,:], optimbound,
                                   rhobeg=0.5, rhoend=1e-4, args=(ypar, moboInfo, kriglist))
@@ -373,105 +397,53 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None, cheapconstlist=N
     return xnext,fnext
 
 
-def singleconstfun(x, krigobj, acquifunc, krigconstlist=None, cheapconstlist=None):
+def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
+                   cheapconstlist=None, pool=None, mode='tiny',
+                   _warned=set()):
     """
     Calculate the single objective acquisition function value
 
     Args:
-        x (nparray): Decision variable to be evaluated.
-        krigobj (object): The kriging object.
-        acquifunc (str): Acquisition function metric.
-        krigconstlist (list): List of Kriging object for constraints. Defaults to None.
-        cheapconstlist (list): List of constraints function. Defaults to None.
-            Expected output of the constraint functions is 1 if the constraint is satisfied and 0 if not.
-            The constraint functions MUST have an input of x (the decision variable to be evaluated)
-
-    Returns:
-        fx (float): The acquisition function value.
-    """
-    # Calculate unconstrained acquisition function
-    acquifuncval = krigobj.predict(x, acquifunc)
-
-    if krigconstlist is not None:
-
-        # Change to list if the type is not list
-        if type(krigconstlist) is not list:
-            krigconstlist = [krigconstlist]
-        else:
-            pass
-
-        nkrigcon = len(krigconstlist)
-
-        pof = np.zeros(shape=[nkrigcon])
-        for ii in range(nkrigcon):
-            pof[ii] = krigconstlist[ii].predict(x, 'PoF')
-        pof = np.prod(pof)
-
-    else:
-        pof = 1
-
-    if cheapconstlist is None:
-        pass
-
-    else:
-        # Change to list if the type is not list
-        if type(cheapconstlist) is not list:
-            cheapconstlist = [cheapconstlist]
-        else:
-            pass
-
-        coeff = np.zeros(shape=[len(cheapconstlist)])
-        for jj in range(len(cheapconstlist)):
-            coeff[jj] = cheapconstlist[jj](x)
-        coeff = np.prod(coeff)
-
-    fx = pof*coeff*acquifuncval
-
-    return fx
-
-
-def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
-                  cheapconstlist=None, pool=None, mode='tiny'):
-    """
-    Calculate the multi objective acquisition function value
-
-    Args:
-        x (np.ndarray): [n_pop, n_dv] Decision variable to be evaluated.
-        ypar (np.ndarray): Array contains the current non-dominated solutions.
-        kriglist (list): List of Kriging object.
-        moboInfo (dict): A structure containing necessary information for Bayesian optimization.
-        krigconstlist ([Kriging]]): List of Kriging object for constraints. Defaults to None.
-        cheapconstlist ([func]]): List of constraints function. Defaults to None.
-            Expected output of the constraint functions is 1 if the constraint is satisfied and 0 if not.
-            The constraint functions MUST have an input of x (the decision variable to be evaluated)
+        x (np.ndarray): Decision variable to be evaluated. If
+            a 2D array is given, specify in the form [n_pop, n_dv].
+        ypar (np.ndarray): [n_par, n_obj] Array containing the current
+            non-dominated solutions in the objective space.
+        krigobj (kriging_model.Kriging): Objective Kriging instance.
+        krigconstlist ([kriging_model.Kriging]): List of constraint
+            Kriging objects. Defaults to None.
+        cheapconstlist ([func]]): List of constraints functions.
+            Defaults to None. Expected output of a constraint function
+            is 1 if the constraint is satisfied and 0 if not.
+            Functions MUST have an input of x (the decision variable
+            to be evaluated). If it can accept 2D [n_pop, n_dv] arrays,
+            vectorised numpy evaluations will be performed.
+        pool (mp.Pool, optional): An existing mp.Pool instance.
+            #TODO: Add pool methods for predict here
+        mode (str/None, optional): ['tiny'/'inf'] Passed to
+            replace_zero_hv() if not None.
 
     Returns:
         fx (np.ndarray/float): The acquisition function value(s). If an
-            [n_pop, n_dv] shape input x array is used, fx returned as an
-            n_pop-len array. If input x is a 1D feature array, fx will
-            be returned as a single float.
+            [n_pop, n_dv]-shape input x array is used, fx is returned
+            as an n_pop-len array. If input x is a 1D feature array,
+            fx will be returned as a single float.
     """
-    acquifunc = moboInfo['acquifunc']
-    if acquifunc.lower() == 'ehvi':
-        acqufunhandle = ehvicalc
-    elif acquifunc.lower() == 'ehvi_vec':
-        acqufunhandle = ehvicalc_vec
-    else:
-        msg = "Only moboInfo['acquifunc'] = 'ehvi' is currently handled"
-        raise NotImplementedError(msg)
+    # Calculate unconstrained acquisition function
+    metric = krigobj.predict(x, acquifunc)
 
+    # Check if 1D feature array -> temporarily convert to 2D array.
+    reshape = False
     if x.ndim == 1:
-        n_pop = 1
-        # n_dv = len(x)
-    else:
-        n_pop, n_dv = x.shape
+        x = np.array([x]).reshape(1, -1)
+        reshape = True
+
+    n_pop = x.shape[0]
 
     if krigconstlist is None:
         pof = 1
-
     else:
         # Change to list if the type is not list
-        if isinstance(krigconstlist, list):
+        if not isinstance(krigconstlist, list):
             krigconstlist = list(krigconstlist)
 
         n_krig_con = len(krigconstlist)
@@ -490,6 +462,12 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
             cheapconstlist = list(cheapconstlist)
 
         coeff = np.zeros([n_pop, len(cheapconstlist)])
+
+        if _warned:
+            # Eval pop members one at a time
+            for i in range(n_pop):
+                for jj in range(len(cheapconstlist)):
+                    coeff[i, jj] = cheapconstlist[jj](x[i, :])
         try:
             # See if cheap constraints can handle [n_pop, n_dv] arrays
             for jj in range(len(cheapconstlist)):
@@ -497,55 +475,212 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
 
         except Exception as e:
             print(f'{e}\n N.B. Cheap constraints coded to handle input '
-                  f'x.shape = [n_samp, n_dv] will run faster! Trying '
+                  f'x.shape = [n_samp, n_dv] will run faster! Doing '
                   f'sequential run.')
-
+            _warned.add(True)  # So we only print warning once.
             for i in range(n_pop):
                 for jj in range(len(cheapconstlist)):
                     coeff[i, jj] = cheapconstlist[jj](x[i, :])
 
         coeff = np.prod(coeff, axis=1)  # n_pop-len coefficient array
 
-    if acquifunc.lower() == 'ehvi_vec':
+    fx = pof * coeff * metric
+
+    # Give a penalty to zero metric for some solvers
+    if mode is not None:
+        replace_zero(metric, mode)
+
+    # If input was 1D feature array return single float
+    if reshape:
+        fx = fx[0]
+    return fx
+
+
+def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
+                  cheapconstlist=None, pool=None, mode='tiny',
+                  _warned=set()):
+    """Calculate the multiobjective acquisition function value.
+
+    Args:
+        x (np.ndarray): Decision variable to be evaluated. If
+            a 2D array is given, specify in the form [n_pop, n_dv].
+        ypar (np.ndarray): [n_par, n_obj] Array containing the current
+            non-dominated solutions in the objective space.
+        kriglist ([kriging_model.Kriging]): List of objective Kriging
+            instances.
+        moboInfo (dict): A structure containing necessary information
+            for Bayesian optimization.
+        krigconstlist ([kriging_model.Kriging], optional): List of
+            constraint Kriging objects. Defaults to None.
+        cheapconstlist ([func]], optional): List of constraints
+            functions. Defaults to None.
+            Expected output of a constraint function is 1 if the
+            constraint is satisfied and 0 if not.
+            Functions MUST have an input of x (the decision variable
+            to be evaluated). If it can accept 2D [n_pop, n_dv] arrays,
+            vectorised numpy evaluations will be performed.
+        pool (mp.Pool, optional): An existing mp.Pool instance.
+        mode (str/None, optional): ['tiny'/'inf'] Passed to
+            replace_zero_hv() if not None.
+
+    Returns:
+        fx (np.ndarray/float): The acquisition function value(s). If an
+            [n_pop, n_dv]-shape input x array is used, fx is returned
+            as an n_pop-len array. If input x is a 1D feature array,
+            fx will be returned as a single float.
+    """
+    # TODO: Remove this logic and pass in the acquifunhandle for deep loop functions!
+    acquifunc = moboInfo['acquifunc']
+    if acquifunc.lower() == 'ehvi':
+        acqufunhandle = ehvicalc
+    elif acquifunc.lower() == 'ehvi_vec':
+        acqufunhandle = ehvicalc_vec
+    elif acquifunc.lower() == 'ehvi_kmac3d':
+        acqufunhandle = ehvicalc_kmac3d
+    else:
+        msg = "Only moboInfo['acquifunc'] = 'ehvi' is currently handled"
+        raise NotImplementedError(msg)
+
+    # Check if 1D feature array -> temporarily convert to 2D array.
+    reshape = False
+    if x.ndim == 1:
+        x = np.array([x]).reshape(1, -1)
+        reshape = True
+
+    n_pop = x.shape[0]
+
+    # Calculate penalty due to expensive constraints
+    if krigconstlist is None:
+        pof = 1
+    else:
+        # Change to list if the type is not list
+        if not isinstance(krigconstlist, list):
+            krigconstlist = list(krigconstlist)
+
+        n_krig_con = len(krigconstlist)
+        pof = np.zeros([n_pop, n_krig_con])
+        for i in range(n_pop):
+            for ii in range(n_krig_con):
+                # predict can only handle 1D inputs at the moment
+                pof[i, ii] = krigconstlist[ii].predict(x[i, :], 'PoF')
+        pof = np.prod(pof, axis=1)  # n_pop-len PoF array
+
+    # Calculate penalty due to cheap constraints
+    if cheapconstlist is None:
+        coeff = 1
+    else:
+        # Change to list if the type is not list
+        if not isinstance(cheapconstlist, list):
+            cheapconstlist = list(cheapconstlist)
+
+        coeff = np.zeros([n_pop, len(cheapconstlist)])
+
+        if _warned:
+            # Eval pop members one at a time
+            for i in range(n_pop):
+                for jj in range(len(cheapconstlist)):
+                    coeff[i, jj] = cheapconstlist[jj](x[i, :])
+        try:
+            # See if cheap constraints can handle [n_pop, n_dv] arrays
+            for jj in range(len(cheapconstlist)):
+                coeff[:, jj] = cheapconstlist[jj](x)
+
+        except Exception as e:
+            print(f'{e}\n N.B. Cheap constraints coded to handle input '
+                  f'x.shape = [n_samp, n_dv] will run faster! Doing '
+                  f'sequential run.')
+            _warned.add(True)  # So we only print warning once.
+            for i in range(n_pop):
+                for jj in range(len(cheapconstlist)):
+                    coeff[i, jj] = cheapconstlist[jj](x[i, :])
+
+        coeff = np.prod(coeff, axis=1)  # n_pop-len coefficient array
+
+    if acquifunc.lower() in ('ehvi_vec', 'ehvi_kmac3d'):
         metric = acqufunhandle(x, ypar, moboInfo, kriglist, pool=pool)
     else:
         metric = acqufunhandle(x, ypar, moboInfo, kriglist)
 
     fx = pof * coeff * metric
-    if x.ndim == 1:
-        if np.isnan(fx):
-            fx = np.inf
-    else:
-        fx[np.isnan(fx)] = np.inf
+
+    # Give a penalty to zero metric for some solvers
+    if mode is not None:
+        replace_zero(metric, mode)
+
+    # If input was 1D feature array return single float
+    if reshape:
+        fx = fx[0]
     return fx
 
 
-def efficientsamp(kriglist, ypar, npop=300):
-    nvar = len(kriglist[0].KrigInfo["ub"])
-    templst = []
-    for ij in range(np.size(ypar, 0)):
-        idx = np.where((kriglist[0].KrigInfo["y"] == ypar[ij, 0]) &
-                       (kriglist[1].KrigInfo["y"] == ypar[ij, 1]))[0][0]
-        templst.append(idx)
+def replace_zero(hv, mode):
+    """Helper function to modify zero values in an array.
 
-    initialization = kriglist[0].KrigInfo["X_norm"][templst, :] / 2 + 0.5
+    Args:
+        hv (np.ndarray): An array of values. Modified in-place.
+        mode (str): ['tiny'/'inf'] The replacement method. If 'tiny'
+            is specified, zeros are replaced with a positive value
+            near np.finfo("float").tiny. If 'inf', then zeros are
+            replaced with np.inf.
+    """
+    z = hv == 0  # mask of values = 0
+    if mode == 'tiny':
+        # give penalty to HV, to avoid error in CMA-ES when all HV = 0
+        rng = np.random.default_rng()
+        hv[z] = rng.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100,
+                            size=np.count_nonzero(z))
+    elif mode == 'inf':
+        # Scipy differential evolution does not like tiny values near zero
+        # https://github.com/scipy/scipy/issues/13784
+        hv[z] = np.inf
+    else:
+        raise ValueError("mode flag must be set to 'tiny' or 'inf'.")
 
+
+def efficientsamp(kriglist, y_par, n_pop=300, std_scale=0.2):
+    """Effective Non-Dominated Sampling
+
+    Generate an n_pop-sized population of samples using a normal
+    distribution around the current n-objective Pareto solutions.
+
+    Args:
+        kriglist ([KrigInfo]): A list containing Kriging KrigInfo
+            from which to get the current decision variables 'X_norm',
+            and bounds 'ub' and 'lb'.
+        y_par (np.ndarray): [n_par, n_obj] Current Pareto front.
+        n_pop (int, optional): The number of samples to generate.
+            Defaults to 300.
+        std_scale (numeric, optional) The standard deviation scaling
+            factor. Defaults to 0.2.
+
+    Returns:
+        init_seed (np.ndarray): [n_pop, n_dv] Array of samples.
+    """
+    # Stack objective values into same shape as y_par
+    objs = np.hstack([k.KrigInfo["y"] for k in kriglist])
+    mask = (objs[:, None] == y_par).all(-1).any(-1)  # mask of matching rows
+    # assert (objs[mask] == y_par).all()
+    idx = np.where(mask)[0]  # indices of matching rows
+    initialization = kriglist[0].KrigInfo["X_norm"][idx, :] / 2 + 0.5
+
+    n_var = len(kriglist[0].KrigInfo["ub"])
+    std_s = np.std(kriglist[0].KrigInfo['X_norm'], 0) * std_scale
     if initialization.ndim == 1:
-        samplenorm = np.random.normal(initialization, np.std(kriglist[0].KrigInfo['X_norm'], 0) * 0.2, (npop, nvar))
+        samplenorm = np.random.normal(initialization, std_s, (n_pop, n_var))
     else:
         n_init = np.size(initialization, 0)
-        nbatch = int(npop / n_init)
-        samplenorm = np.zeros((npop, nvar))
+        n_batch = int(n_pop / n_init)
+        samplenorm = np.zeros((n_pop, n_var))
         for ij in range(n_init - 1):
-            samplenorm[ij * nbatch:(ij + 1) * nbatch, :] = np.random.normal(initialization[ij, :],
-                                                                            np.std(kriglist[0].KrigInfo['X_norm'],
-                                                                                   0) * 0.2,
-                                                                            (nbatch, nvar))
-        samplenorm[(ij + 1) * nbatch:, :] = np.random.normal(initialization[(ij + 1), :],
-                                                             np.std(kriglist[0].KrigInfo['X_norm'], 0) * 0.2,
-                                                             (np.size(samplenorm[(ij + 1) * nbatch:, :], 0), nvar))
+            dist = np.random.normal(initialization[ij, :], std_s, (n_batch, n_var))
+            samplenorm[ij * n_batch:(ij + 1) * n_batch, :] = dist
+        n_remain = np.size(samplenorm[(ij + 1) * n_batch:, :], 0)
+        dist = np.random.normal(initialization[(ij + 1), :], std_s, (n_remain, n_var))
+        samplenorm[(ij + 1) * n_batch:, :] = dist
         samplenorm[samplenorm < 0] = 0
         samplenorm[samplenorm > 1] = 1
 
-    init_seed =realval(kriglist[0].KrigInfo["lb"], kriglist[0].KrigInfo["ub"], samplenorm)
+    init_seed = realval(kriglist[0].KrigInfo["lb"],
+                        kriglist[0].KrigInfo["ub"],
+                        samplenorm)
     return init_seed
