@@ -327,7 +327,8 @@ def uncGA_vec(fit_func, lb, ub, min_fit=True, disp=False, n_pop=300,
         # Mutation
         total_pop[1:, :n_dv] = mutation.gaussmut_vec(total_pop[1:, :n_dv].copy(),
                                                      p_mut, ub, lb, rand_seed)
-        total_pop[1:, n_dv] = fit_func(total_pop[1:, :n_dv].copy(), *args, pool=pool)
+        total_pop[1:, n_dv] = fit_func(total_pop[1:, :n_dv].copy(), *args,
+                                       pool=pool)
 
         history[generation - 1, 0] = generation
         history[generation - 1, 1] = best_fitness
@@ -354,7 +355,8 @@ def uncGA2(fit_func, lb, ub, min_fit=True, disp=False, n_pop=300, max_gen=200,
            min_gen=50, min_fit_err=1e-2, pool=None):
     """A more efficient implementation of unGA.
 
-    Tidied and 'pythonised' version of the original implementation.
+    Tidied and 'pythonised' version of the original uncGA
+    implementation - loops have been left in place.
 
     Wherever possible, the fitness function is evaluated with a
     processing pool, if specified.
@@ -412,7 +414,6 @@ def uncGA2(fit_func, lb, ub, min_fit=True, disp=False, n_pop=300, max_gen=200,
     else:
         n_dv = len(ub)
 
-    history = np.zeros([max_gen, 2])
     # Initialize population
     if initialization is None:
         # samplenorm = haltonsampling.halton(nvar, n_pop)
@@ -424,6 +425,7 @@ def uncGA2(fit_func, lb, ub, min_fit=True, disp=False, n_pop=300, max_gen=200,
     population[:, n_dv] = fit_func(population[:, :n_dv], *args, pool=pool)
 
     # Evolution loop
+    history = np.zeros([max_gen, 2])
     generation = 1
     old_fitness = 0
     best_x = None
@@ -471,14 +473,16 @@ def uncGA2(fit_func, lb, ub, min_fit=True, disp=False, n_pop=300, max_gen=200,
                 idx_1 = int(np.ceil(n_pop * random_sample()))
                 idx_2 = int(np.ceil(n_pop * random_sample()))
             if random_sample() < p_cross:
-                child = SBX.SBX(mating_pool[idx_1, :], mating_pool[idx_2, :], n_dv, lb, ub)
+                child = SBX.SBX(mating_pool[idx_1, :],mating_pool[idx_2, :],
+                                n_dv, lb, ub)
                 temp_pop[jj, :n_dv] = child[0, :]
                 temp_pop[jj + 1, :n_dv] = child[1, :]
             else:
                 temp_pop[jj, 0:n_dv] = mating_pool[idx_1, :]
                 temp_pop[jj + 1, 0:n_dv] = mating_pool[idx_2, :]
 
-            temp_pop[jj:jj+2, n_dv] = fit_func(temp_pop[jj:jj+2, :n_dv], *args, pool=pool)
+            temp_pop[jj:jj+2, n_dv] = fit_func(temp_pop[jj:jj+2, :n_dv],
+                                               *args, pool=pool)
 
         # Combined Population for Elitism
         total_pop = np.vstack((population, temp_pop))
@@ -496,8 +500,10 @@ def uncGA2(fit_func, lb, ub, min_fit=True, disp=False, n_pop=300, max_gen=200,
 
         # Mutation
         for kk in range(1, (2 * n_pop)):
-            total_pop[kk, :n_dv] = mutation.gaussmut(total_pop[kk, :n_dv], n_dv, p_mut, ub, lb)
-            total_pop[kk, n_dv] = fit_func(total_pop[kk, :n_dv], *args, pool=pool)
+            total_pop[kk, :n_dv] = mutation.gaussmut(total_pop[kk, :n_dv],
+                                                     n_dv, p_mut, ub, lb)
+            total_pop[kk, n_dv] = fit_func(total_pop[kk, :n_dv], *args,
+                                           pool=pool)
 
         history[generation - 1, 0] = generation
         history[generation - 1, 1] = best_fitness

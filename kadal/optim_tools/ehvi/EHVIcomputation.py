@@ -1,7 +1,12 @@
 import numpy as np
-import multiprocessing as mp
 from kadal.optim_tools.ehvi.exi2d import exi2d
-from kadal.extern.HDYE_3D_Update import kmac
+try:
+    from kadal.extern.HDYE_3D_Update import kmac
+except ImportError as e:
+    msg = (f"{e}\n\nKMAC library has probably not been compiled for this "
+           f"python version yet. Go to above path and run 'cmake .; make'. "
+           f"You may need to check the paths in 'CMakeLists.txt' first.")
+    raise ImportError(msg)
 
 
 def ehvicalc(x,ypar,moboInfo,kriglist):
@@ -101,7 +106,8 @@ def pool_hv_exi2d(pool, x, kriglist, y_par, ref_point):
             reference point location.
 
     Returns:
-        hv (np.ndarray): n_pop-len array of hypervolumes for each samp.
+        hv (np.ndarray): n_pop-len array of hypervolumes for each
+            population member.
     """
     n_pop = x.shape[0]
     hv = np.zeros(n_pop)
@@ -109,7 +115,8 @@ def pool_hv_exi2d(pool, x, kriglist, y_par, ref_point):
     pred, SSqr = pool_predict(pool, x, kriglist)
 
     # Set up exi2d loop args and pass to pool
-    hv_args = ((y_par, ref_point, pred[i, :], SSqr[i, :]) for i in range(n_pop))
+    hv_args = ((y_par, ref_point, pred[i, :], SSqr[i, :])
+               for i in range(n_pop))
     hv[:] = pool.starmap(exi2d, hv_args)
     hv *= -1
     return hv
@@ -121,9 +128,6 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
     Vectorises above EHVI function as much as possible. Currently,
     still depends on the vectorisation of prediction.py prediction() and
     kadal.optim_tools.ehvi.exi2d.exi2d() for best performance boost.
-
-    Checks for moboInfo['n_cpu'] - if specified, multiprocessing will
-    be used for Kriging objective evaluations.
 
     Args:
         x (np.ndarray): [n_pop, n_dv] Design variables for a population.
@@ -149,9 +153,6 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
 
     n_pop = x.shape[0]
     n_obj = len(kriglist)
-    if n_obj != 2:
-        print('### WARNING: ehvical_vec is only valid to 2-objective EHVI! '
-              'Use ehvicalc_kmac3d for vectorised 3D EHVI using Leiden KMAC.')
     ref_point = moboInfo["refpoint"]
 
     if pool is None:
@@ -182,7 +183,7 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
 
 
 def ehvicalc_kmac3d(x, y_par, moboInfo, kriglist, pool=None):
-    """Calculate EHVI using Leiden Uni's KMAC c++ code.
+    """Calculate 3D EHVI using Leiden Uni's KMAC c++ code.
 
     Uses the multi 'sliceupdate' mode.
 
@@ -190,7 +191,7 @@ def ehvicalc_kmac3d(x, y_par, moboInfo, kriglist, pool=None):
         x (np.ndarray): [n_pop, n_dv] Design variables for a population.
         y_par (np.ndarray): [n_par, n_obj] Current Pareto front.
         moboInfo (dict): Structure containing necessary information for
-            multiobjective Bayesian optimization.
+            multi-objective Bayesian optimization.
         kriglist ([kriging_model.Kriging]): n_obj-len list of objective
             Kriging instances.
         pool (mp.Pool, optional): An existing mp.Pool instance can be
@@ -210,8 +211,6 @@ def ehvicalc_kmac3d(x, y_par, moboInfo, kriglist, pool=None):
 
     n_pop = x.shape[0]
     n_obj = len(kriglist)
-    if n_obj != 3:
-        raise ValueError('ehvicalc_kmac3d can only be used with 3-objectives.')
     ref_point = moboInfo["refpoint"]
 
     hv = np.zeros(n_pop)
@@ -227,9 +226,9 @@ def ehvicalc_kmac3d(x, y_par, moboInfo, kriglist, pool=None):
     else:
         pred, SSqr = pool_predict(pool, x, kriglist)
 
-    # Invert inputs as KMAC expects maximisation - can do multiple inputs at once
+    # Invert inputs as KMAC expects maximisation - can do multiple samples at once
     # Compute (negative of) hypervolume using KMAC C++ code from Leiden Uni
-    hv[:] = -kmac.ehvi3d_sliceupdate(-y_par, -ref_point, -pred, SSqr)
+    hv[:] = -kmac.ehvi3d_sliceupdate_multi(-y_par, -ref_point, -pred, SSqr)
 
     # If 1D input, expects float output (legacy behaviour)
     if reshape:

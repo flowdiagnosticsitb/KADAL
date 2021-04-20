@@ -1,6 +1,5 @@
 import time
 import numpy as np
-import multiprocessing as mp
 from kadal.misc.sampling.samplingplan import realval
 from scipy.optimize import minimize, fmin_cobyla, differential_evolution
 from kadal.optim_tools.ehvi.EHVIcomputation import ehvicalc, ehvicalc_vec, ehvicalc_kmac3d
@@ -126,7 +125,6 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
         args = (krigobj, acquifunc, krigconstlist, cheapconstlist, None, 'inf')
         de_kwargs['args'] = args
 
-        # Start pool at this level if no pool and n_cpu > 1
         if pool is not None:
             workers = pool.map
             # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
@@ -315,7 +313,7 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
         else:
             de_kwargs = {}
 
-        # Set ENDS or DE sample init, if specified, default to latinhypercube
+        # Set ENDS or DE sample init, if specified. Else, default to 'latinhypercube'
         if moboInfo['ehvisampling'] == 'efficient':
             n_pop_factor = de_kwargs.get('popsize', 10)
             n_var = n_var
@@ -331,15 +329,6 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
         # Can't pass pool to acqufunc (child process)
         args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist, None, 'inf')
         de_kwargs['args'] = args
-
-        # Start pool at this level if no pool and n_cpu > 1
-        if '_n_cpu' not in moboInfo:
-            # Only for the first restart, set for later restarts
-            moboInfo['_n_cpu'] = moboInfo.get('n_cpu', 1)
-        if moboInfo.get('_n_cpu', 1) == 1:
-            pool = None
-        else:
-            pool = mp.Pool(processes=moboInfo['_n_cpu'])
 
         if pool is not None:
             workers = pool.map
@@ -365,10 +354,6 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
         I = np.argmin(fnextcand)
         xnext = xnextcand[I, :]
         fnext = fnextcand[I]
-
-        if pool is not None:
-            pool.close()
-            pool.join()
 
     elif acquifuncopt.lower() == 'cobyla':
         Xrand = realval(low_bound, up_bound,
@@ -399,7 +384,7 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
 
 def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
                    cheapconstlist=None, pool=None, mode='tiny',
-                   _warned=set()):
+                   __warned=set()):
     """
     Calculate the single objective acquisition function value
 
@@ -463,7 +448,7 @@ def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
 
         coeff = np.zeros([n_pop, len(cheapconstlist)])
 
-        if _warned:
+        if __warned:
             # Eval pop members one at a time
             for i in range(n_pop):
                 for jj in range(len(cheapconstlist)):
@@ -477,7 +462,7 @@ def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
             print(f'{e}\n N.B. Cheap constraints coded to handle input '
                   f'x.shape = [n_samp, n_dv] will run faster! Doing '
                   f'sequential run.')
-            _warned.add(True)  # So we only print warning once.
+            __warned.add(True)  # So we only print warning once.
             for i in range(n_pop):
                 for jj in range(len(cheapconstlist)):
                     coeff[i, jj] = cheapconstlist[jj](x[i, :])
@@ -498,7 +483,7 @@ def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
 
 def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
                   cheapconstlist=None, pool=None, mode='tiny',
-                  _warned=set()):
+                  __warned=set()):
     """Calculate the multiobjective acquisition function value.
 
     Args:
@@ -575,7 +560,7 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
 
         coeff = np.zeros([n_pop, len(cheapconstlist)])
 
-        if _warned:
+        if __warned:
             # Eval pop members one at a time
             for i in range(n_pop):
                 for jj in range(len(cheapconstlist)):
@@ -589,7 +574,7 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
             print(f'{e}\n N.B. Cheap constraints coded to handle input '
                   f'x.shape = [n_samp, n_dv] will run faster! Doing '
                   f'sequential run.')
-            _warned.add(True)  # So we only print warning once.
+            __warned.add(True)  # So we only print warning once.
             for i in range(n_pop):
                 for jj in range(len(cheapconstlist)):
                     coeff[i, jj] = cheapconstlist[jj](x[i, :])
