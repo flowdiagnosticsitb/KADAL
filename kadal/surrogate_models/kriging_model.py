@@ -163,12 +163,13 @@ class Kriging:
             self.KrigInfo["F"] = compute_regression_mat(self.KrigInfo["idx"], self.KrigInfo["X"], bound,
                                                         np.ones(shape=[self.KrigInfo["nvar"]]))
 
-    def train(self, parallel=False, disp=True, pre_theta=None):
+    def train(self, n_cpu=1, disp=True, pre_theta=None):
         """
         Train Kriging model
         
         Args:
-            parallel (bool): Parallel processing or not. Default to False.
+            n_cpu (bool): If > 1, uses parallel processing. Defaults
+                to 1.
             disp (bool): Display process or not. Default to True.
             
         Returns:
@@ -241,7 +242,7 @@ class Kriging:
                 print(f"Training {self.KrigInfo['nrestart']} hyperparameter(s)")
 
             # Train hyperparams
-            bestxcand,neglnlikecand = self.parallelopt(xhyp,parallel,optimbound,disp)
+            bestxcand,neglnlikecand = self.parallelopt(xhyp,n_cpu,optimbound,disp)
 
             # Search best hyperparams among the candidates
             I = np.argmin(neglnlikecand)
@@ -323,13 +324,13 @@ class Kriging:
         result = prediction(x,self.KrigInfo,predtypes=predtypes, drm=drmmodel)
         return result
 
-    def parallelopt(self,xhyp,parallel,optimbound,disp=True):
+    def parallelopt(self,xhyp,n_cpu,optimbound,disp=True):
         """
         Optimize hyperparameter using parallel processing
 
         Args:
             xhyp (nparray): Array of starting points.
-            parallel (bool): True or False. Perform parallel processing or not
+            n_cpu (int): If > 1, uses parallel processing.
             loglvl (str): level of logging function.
 
          Returns:
@@ -341,35 +342,16 @@ class Kriging:
         neglnlikecand = np.zeros(shape=[self.KrigInfo['nrestart']])
 
         # Try to identify number of core on machine fo multiprocessing
-        try:
-            n_cpu = mp.cpu_count()
-            skip_mp = False
-        except NotImplementedError:
-            # No idea how many cores so just run sequentially
-            skip_mp = True
+        # try:
+        #     n_cpu = mp.cpu_count()
+        #     skip_mp = False
+        # except NotImplementedError:
+        #     # No idea how many cores so just run sequentially
+        #     skip_mp = True
 
-        if parallel:
-            pass
-        else:
-            skip_mp = True
-
-        if skip_mp:
-            # Calculate hyperparams sequentially
-            for ii in range(self.KrigInfo['nrestart']):
-
-                if disp:
-                    print(f'Training hyperparameter candidate no.{ii + 1}')
-
-                xhyp_ii = xhyp[ii, :]
-                p = (self.KrigInfo, xhyp_ii, self.trainvar,self.KrigInfo['ubhyp'], self.KrigInfo['lbhyp'],
-                     self.sigmacmaes, self.scaling, optimbound)
-                bestxcand_ii, neglnlikecand_ii = tune_hyperparameters(*p)
-                bestxcand[ii, :] = bestxcand_ii
-                neglnlikecand[ii] = neglnlikecand_ii
-
-        else:
+        if n_cpu > 1:
             # Calculate hyperparams in parallel
-            print(f"Training in parallel on {n_cpu} available cores.")
+            print(f"Training in parallel on {n_cpu} cores.")
 
             hyperparam_inputs = []
             for ii in range(self.KrigInfo['nrestart']):
@@ -385,6 +367,20 @@ class Kriging:
             for i, (bestxcand_ii, neglnlikecand_ii) in enumerate(results):
                 bestxcand[i] = bestxcand_ii
                 neglnlikecand[i] = neglnlikecand_ii
+
+        else:
+            # Calculate hyperparams sequentially
+            for ii in range(self.KrigInfo['nrestart']):
+
+                if disp:
+                    print(f'Training hyperparameter candidate no.{ii + 1}')
+
+                xhyp_ii = xhyp[ii, :]
+                p = (self.KrigInfo, xhyp_ii, self.trainvar,self.KrigInfo['ubhyp'], self.KrigInfo['lbhyp'],
+                     self.sigmacmaes, self.scaling, optimbound)
+                bestxcand_ii, neglnlikecand_ii = tune_hyperparameters(*p)
+                bestxcand[ii, :] = bestxcand_ii
+                neglnlikecand[ii] = neglnlikecand_ii
 
         return (bestxcand,neglnlikecand)
 

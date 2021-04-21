@@ -1,6 +1,7 @@
 import numpy as np
 from copy import deepcopy
 import scipy.io as sio
+import multiprocessing as mp
 from kadal.testcase.analyticalfcn.cases import evaluate
 from kadal.surrogate_models.kriging_model import Kriging
 from kadal.optim_tools import searchpareto
@@ -43,9 +44,10 @@ class MOBO:
             chpconst (list): List of cheap constraint function.
 
         """
-        self.moboInfo = moboinfocheck(moboInfo, autoupdate)
+        n_krig = len(kriglist)
+        self.moboInfo = moboinfocheck(moboInfo, autoupdate, n_krig)
         self.kriglist = kriglist
-        self.krignum = len(self.kriglist)
+        self.krignum = n_krig
         self.autoupdate = autoupdate
         self.multiupdate = multiupdate
         self.savedata = savedata
@@ -57,7 +59,9 @@ class MOBO:
         Run multi objective unconstrained Bayesian optimization.
 
         Args:
-            disp (bool): Display process or not. Defaults to True
+            disp (bool): Display process or not. Defaults to True.
+            infeasible (np.ndarray): Indices of infeasible to samples
+                to delete. Defaults to None.
 
         Returns:
             xupdate (nparray): Array of design variables updates.
@@ -98,8 +102,14 @@ class MOBO:
             pass
 
         # Perform update on design space
-        if self.moboInfo['acquifunc'].lower() == 'ehvi':
-            self.ehviupdate(disp)
+        if self.moboInfo['acquifunc'].lower() in ('ehvi', 'ehvi_vec', 'ehvi_kmac3d'):
+            # Start pool at this level if no pool and n_cpu > 1
+            # self.ehviupdate(disp)
+            if self.moboInfo.get('n_cpu', 1) == 1:
+                self.ehviupdate(disp)
+            else:
+                with mp.Pool(processes=self.moboInfo['n_cpu']) as pool:
+                    self.ehviupdate(disp, pool=pool)
         elif self.moboInfo['acquifunc'].lower() == 'parego':
             self.paregoupdate(disp)
         else:
@@ -122,7 +132,7 @@ class MOBO:
         return xupdate,yupdate,supdate,metricall
 
 
-    def ehviupdate(self, disp):
+    def ehviupdate(self, disp, pool=None):
         """
         Update MOBO using EHVI algorithm.
 
@@ -150,7 +160,7 @@ class MOBO:
                 for ii,krigobj in enumerate(self.kriglist):
                     yprednext[ii], sprednext[ii] = krigobj.predict(xnext,['pred','s'])
             else:
-                xnext, yprednext, sprednext, metricnext = self.simultpredehvi(disp)
+                xnext, yprednext, sprednext, metricnext = self.simultpredehvi(disp=disp, pool=pool)
 
             if self.nup == 0:
                 self.metricall = metricnext
@@ -225,9 +235,13 @@ class MOBO:
                       f"Maximum no. updates: {self.moboInfo['nup']+1}")
 
 
-    def simultpredehvi(self,disp=False):
+    def simultpredehvi(self, disp=False, pool=None):
         """
         Perform multi updates on EHVI MOBO using Kriging believer method.
+
+        Args:
+            disp (bool, optional): Print updates. Defaults to False.
+            pool (mp.Pool, optional): An existing mp.Pool instance.
 
         Returns:
              xalltemp (nparray) : Array of design variables updates.
@@ -235,9 +249,10 @@ class MOBO:
              metricall (nparray) : Array of metric of the updates.
         """
 
-        krigtemp = [0]*len(self.kriglist)
-        for index,obj in enumerate(self.kriglist):
-            krigtemp[index] = deepcopy(obj)
+        # krigtemp = [0]*len(self.kriglist)
+        # for index,obj in enumerate(self.kriglist):
+        #     krigtemp[index] = deepcopy(obj)
+        krigtemp = [deepcopy(obj) for obj in self.kriglist]
         yprednext = np.zeros(shape=[len(krigtemp)])
         sprednext = np.zeros(shape=[len(krigtemp)])
         ypartemp = self.ypar
@@ -247,11 +262,12 @@ class MOBO:
             t1 = time.time()
             if disp:
                 print(f"update number {ii+1}")
-            else:
-                pass
 
-            xnext, metrictemp = run_multi_opt(krigtemp, self.moboInfo, ypartemp, self.krigconstlist,
-                                              self.cheapconstlist)
+            xnext, metrictemp = run_multi_opt(krigtemp, self.moboInfo,
+                                              ypartemp,
+                                              krigconstlist=self.krigconstlist,
+                                              cheapconstlist=self.cheapconstlist,
+                                              pool=pool)
             bound = np.vstack((- np.ones(shape=[1, krigtemp[0].KrigInfo["nvar"]]),
                                np.ones(shape=[1, krigtemp[0].KrigInfo["nvar"]])))
 
@@ -403,14 +419,17 @@ class MOBO:
             sio.savemat(self.moboInfo["filename"],{"xbest":Xbest,"ybest":self.ypar})
 
 
-def moboinfocheck(moboInfo, autoupdate):
+def moboinfocheck(moboInfo, autoupdate, n_krig):
     """
     Function to check the MOBO information and set MOBO Information to default value if
     required parameters are not supplied.
 
     Args:
-         moboInfo (dict): Structure containing necessary information for multi-objective Bayesian optimization.
-         autoupdate (bool): True or False, depends on your decision to evaluate your function automatically or not.
+        moboInfo (dict): Structure containing necessary information
+            for multi-objective Bayesian optimization.
+        autoupdate (bool): True or False, depends on your decision
+            to evaluate your function automatically or not.
+        n_krig (int): The number of objective functions.
 
      Returns:
          moboInfo (dict): Checked/Modified MOBO Information
@@ -434,14 +453,14 @@ def moboinfocheck(moboInfo, autoupdate):
         moboInfo["acquifunc"] = "EHVI"
         print("The acquisition function is not specified, set to EHVI")
     else:
-        availacqfun = ["ehvi", "parego"]
+        availacqfun = ["ehvi", "ehvi_vec", "ehvi_kmac3d", "parego"]
         if moboInfo["acquifunc"].lower() not in availacqfun:
             raise ValueError(moboInfo["acquifunc"], " is not a valid acquisition function.")
         else:
             pass
 
     # Set necessary params for multiobjective acquisition function
-    if moboInfo["acquifunc"].lower() == "ehvi":
+    if moboInfo["acquifunc"].lower() in ("ehvi", "ehvi_vec", "ehvi_kmac3d"):
         if "refpoint" not in moboInfo:
             moboInfo["refpointtype"] = 'dynamic'
         else:
@@ -451,6 +470,13 @@ def moboinfocheck(moboInfo, autoupdate):
             refpointavail = ['dynamic','static']
             if moboInfo["refpointtype"].lower() not in refpointavail:
                 raise ValueError(moboInfo["refpointtype"],' is not valid type')
+
+        if n_krig == 2 and moboInfo["acquifunc"].lower() not in ("ehvi", "ehvi_vec"):
+            msg = 'For 2-objective optimization, set "acquifunc" to "ehvi" or "ehvi_vec"'
+            raise NotImplementedError(msg)
+        elif n_krig == 3 and moboInfo["acquifunc"].lower() != 'ehvi_kmac3d':
+            msg = 'For 3-objective optimization, set "acquifunc" to "ehvi_kmac3d"'
+            raise NotImplementedError(msg)
 
     elif moboInfo["acquifunc"].lower() == "parego":
         moboInfo["krignum"] = 1
@@ -493,5 +519,13 @@ def moboinfocheck(moboInfo, autoupdate):
             raise ValueError(moboInfo['ehvisampling'], ' is not a valid option')
         else:
             print("EHVI sampling is set to ", moboInfo['ehvisampling'])
+
+    if "n_cpu" not in moboInfo:
+        moboInfo['n_cpu'] = 1
+        print("n_cpu not specified, set to 1")
+    else:
+        if moboInfo["n_cpu"] < 1:
+            raise ValueError("BayesInfo['n_cpu'] should be at least one")
+        print(f"n_cpu is set to {moboInfo['n_cpu']} by user")
 
     return moboInfo
