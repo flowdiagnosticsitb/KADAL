@@ -379,7 +379,47 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
         xnext = xnextcand[I, :]
         fnext = fnextcand[I]
 
-    return xnext,fnext
+    elif acquifuncopt.lower() == 'fcmaes':
+        # Delayed import as fcmaes is not installed by default
+        import fcmaes.advretry
+        import fcmaes.optimizer
+        # Load fast-cmaes settings from fc_kwargs dict, if present
+        fc_kwargs = moboInfo.get('fc_kwargs', {})
+        fc_kwargs['max_evaluations'] = fc_kwargs.get('max_evaluations', 1500)
+        fc_kwargs['popsize'] = fc_kwargs.get('popsize', 31)
+        fc_kwargs['stop_fitness'] = fc_kwargs.get('stop_fitness', -np.inf)
+        optimbound = list(zip(low_bound, up_bound))
+
+        args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist, None, 'inf')
+        func = PackagedFunc(multiconstfun, args)
+        logger = fcmaes.optimizer.logger()
+        optimizer = fcmaes.optimizer.de_cma_py(max_evaluations=fc_kwargs['max_evaluations'],
+                                               popsize=fc_kwargs['popsize'],
+                                               stop_fitness=fc_kwargs['stop_fitness'])
+
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
+
+        for im in range(n_restart):
+            r_t = time.time()
+            res = fcmaes.advretry.minimize(func.eval, optimbound,
+                                           optimizer=optimizer,
+                                           logger=logger,
+                                           **fc_kwargs)
+
+            xnextcand[im, :] = res.x
+            fnextcand[im] = res.fun
+            print_res(r_t, res.fun, res.x, success=res.success,
+                      n_eval=res.nfev, i_restart=im, n_restart=n_restart)
+
+        I = np.argmin(fnextcand)
+        xnext = xnextcand[I, :]
+        fnext = fnextcand[I]
+    else:
+        msg = f"Requested acquifuncopt '{acquifuncopt}' is not available."
+        raise NotImplementedError(msg)
+
+    return xnext, fnext
 
 
 def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
@@ -669,3 +709,36 @@ def efficientsamp(kriglist, y_par, n_pop=300, std_scale=0.2):
                         kriglist[0].KrigInfo["ub"],
                         samplenorm)
     return init_seed
+
+
+class PackagedFunc:
+    """Helper class for fcmaes/pygmo-type optimisers."""
+    def __init__(self, func, args):
+        """Package constraint func and args into accessible class.
+
+        For some optimizers, we can't pass in args directly to fully
+        specify the fitness function. This class packs the args into
+        an instance variable which can be accessed at evaluation time.
+
+        In the place of original 'func', do:
+
+             p_func = PackagedFunc(func, args)
+
+        and pass in:
+
+            p_func.eval
+
+        as the fitness function.
+
+        Args:
+            func (callable): The function to be optimised with the
+                signature func(x, *args)
+            args (tuple/list): A list of tuple of arguments passed
+                to func.
+        """
+        self.func = func
+        self.args = args
+
+    def eval(self, x):
+        """The surrogate fitness function."""
+        return self.func(x, *self.args)

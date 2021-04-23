@@ -465,6 +465,10 @@ def moboinfocheck(moboInfo, autoupdate, n_krig):
             moboInfo["refpointtype"] = 'dynamic'
         else:
             moboInfo["refpointtype"] = 'static'
+            if len(moboInfo["refpoint"]) != n_krig:
+                msg = (f'refpoint {moboInfo["refpoint"]} should have the same '
+                       f'dimension as the number of Kriging models ({n_krig})!')
+                raise ValueError(msg)
         
         if 'refpointtype' in moboInfo:
             refpointavail = ['dynamic','static']
@@ -488,7 +492,7 @@ def moboinfocheck(moboInfo, autoupdate, n_krig):
         moboInfo["acquifuncopt"] = "lbfgsb"
         print("The acquisition function optimizer is not specified, set to L-BFGS-B.")
     else:
-        availableacqoptimizer = ['lbfgsb', 'cobyla', 'cmaes', 'ga', 'diff_evo']
+        availableacqoptimizer = ['lbfgsb', 'cobyla', 'cmaes', 'ga', 'diff_evo', 'fcmaes']
         if moboInfo["acquifuncopt"].lower() not in availableacqoptimizer:
             raise ValueError(moboInfo["acquifuncopt"], " is not a valid acquisition function optimizer.")
         else:
