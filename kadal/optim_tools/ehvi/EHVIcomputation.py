@@ -3,9 +3,12 @@ from kadal.optim_tools.ehvi.exi2d import exi2d
 try:
     from kadal.extern.HDYE_3D_Update import kmac
 except ImportError as e:
+    import pathlib
+    f_path = pathlib.Path(__file__).parent
+    lib_path = (f_path / '../../extern/HDYE_3D_Update').resolve()
     msg = (f"{e}\n\nKMAC library has probably not been compiled for this "
-           f"python version yet. Go to above path and run 'cmake .; make'. "
-           f"You may need to check the paths in 'CMakeLists.txt' first.")
+           f"python version yet. Go to:\n{lib_path}\nand run 'cmake . && make'."
+           f" You may need to check the paths in 'CMakeLists.txt' first.")
     raise ImportError(msg)
 
 
