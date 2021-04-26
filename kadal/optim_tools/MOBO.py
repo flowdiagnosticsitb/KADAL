@@ -17,32 +17,53 @@ class MOBO:
     Perform multi-objective Bayesian Optimization
 
     Args:
-        moboInfo (dict): Dictionary containing necessary information for multi-objective Bayesian optimization.
-        kriglist (list): List of Kriging object.
-        autoupdate (bool): True or False, depends on your decision to evaluate your function automatically or not.
-        multiupdate (int): Number of suggested samples returned for each iteration.
-        expconst (list): List of constraints Kriging object.
-        chpconst (list): List of cheap constraint function.
+        moboInfo (dict): Dictionary containing necessary information
+            for multi-objective Bayesian optimization.
+        kriglist ([kriging_model.Kriging]): List of objective Kriging
+            instances.
+        autoupdate (bool, optional): Automatically continue evaluations
+            of the objective functions. Defaults to True.
+        multiupdate (int, optional): Number of suggested samples
+            returned for each iteration. Defaults to 0.
+        savedata (bool, optional): Save data for each iteration.
+            Defaults to True.
+        expconst ([kriging_model.Kriging], optional): Kriging instances
+            for constraints. Defaults to None.
+        chpconst ([func], optional): Constraint functions. Defaults to
+            None. Expected output of the constraint functions is 1 if
+            satisfied and 0 if not. The constraint functions MUST have
+            an input of x (the decision variable to be evaluated).
 
     Returns:
-        xupdate (nparray): Array of design variables updates.
-        yupdate (nparray): Array of objectives updates
-        metricall (nparray): Array of metric values of the updates.
+        xupdate (np.ndarray): Array of design variables updates.
+        yupdate (np.ndarray): Array of objectives updates
+        metricall (np.ndarray): Array of metric values of the updates.
     """
 
-    def __init__(self, moboInfo, kriglist, autoupdate=True, multiupdate=0, savedata=True, expconst=None, chpconst=None):
+    def __init__(self, moboInfo, kriglist, autoupdate=True, multiupdate=0,
+                 savedata=True, expconst=None, chpconst=None):
         """
         Initialize MOBO class
 
         Args:
-            moboInfo (dict): Dictionary containing necessary information for multi-objective Bayesian optimization.
-            kriglist (list): List of Kriging object.
-            autoupdate (bool): True or False, depends on your decision to evaluate your function automatically or not.
-            multiupdate (int): Number of suggested samples returned for each iteration.
-            savedata (bool): Save data for each iteration or not. Defaults to True.
-            expconst (list): List of constraints Kriging object.
-            chpconst (list): List of cheap constraint function.
-
+            moboInfo (dict): Dictionary containing necessary information
+                for multi-objective Bayesian optimization.
+            kriglist ([kriging_model.Kriging]): List of objective
+                Kriging instances.
+            autoupdate (bool, optional): Automatically continue
+                evaluations of the objective functions. Defaults to
+                True.
+            multiupdate (int, optional): Number of suggested samples
+                returned for each iteration. Defaults to 0.
+            savedata (bool, optional): Save data for each iteration.
+                Defaults to True.
+            expconst ([kriging_model.Kriging], optional): Kriging
+                instances for constraints. Defaults to None.
+            chpconst ([func], optional): Constraint functions. Defaults
+                to None. Expected output of the constraint functions is
+                1 if satisfied and 0 if not. The constraint functions
+                MUST have an input of x (the decision variable to be
+                evaluated).
         """
         n_krig = len(kriglist)
         self.moboInfo = moboinfocheck(moboInfo, autoupdate, n_krig)
@@ -54,25 +75,52 @@ class MOBO:
         self.krigconstlist = expconst
         self.cheapconstlist = chpconst
 
-    def run(self,disp=True,infeasible=None):
+    def run(self, disp=True, infeasible=None, n_cpu=1):
         """
         Run multi objective unconstrained Bayesian optimization.
 
         Args:
-            disp (bool): Display process or not. Defaults to True.
-            infeasible (np.ndarray): Indices of infeasible to samples
-                to delete. Defaults to None.
+            disp (bool, optional): Print progress. Defaults to True.
+            infeasible (np.ndarray, optional): Indices of infeasible
+                samples to delete. Defaults to None.
+            n_cpu (int, optional): The number of processors to use in a
+                multiprocessing.Pool. Default 1 will not run a pool.
 
         Returns:
             xupdate (nparray): Array of design variables updates.
             yupdate (nparray): Array of objectives updates
             metricall (nparray): Array of metric values of the updates.
-
         """
 
+        print(f'Running with n_cpu: {n_cpu} for supported functions.')
+        if n_cpu == 1:
+            return self._run(disp=disp, pool=None)
+        else:
+            with mp.Pool(processes=n_cpu) as pool:
+                return self._run(disp=disp, pool=pool)
+
+    def _run(self,disp=True,infeasible=None, pool=None):
+        """
+        Run multi objective unconstrained Bayesian optimization.
+
+        Args:
+            disp (bool, optional): Print progress. Defaults to True.
+            infeasible (np.ndarray, optional): Indices of infeasible
+                samples to delete. Defaults to None.
+            pool (int, optional): A multiprocessing.Pool instance.
+                Will be passed to functions for use, if specified.
+                Defaults to None.
+
+        Returns:
+            xupdate (nparray): Array of design variables updates.
+            yupdate (nparray): Array of objectives updates
+            metricall (nparray): Array of metric values of the updates.
+        """
         self.nup = 0  # Number of current iteration
         self.Xall = self.kriglist[0].KrigInfo['X']
-        self.yall = np.zeros(shape=[np.size(self.kriglist[0].KrigInfo["y"],axis=0),len(self.kriglist)])
+        y_shape = [np.size(self.kriglist[0].KrigInfo["y"], axis=0),
+                   len(self.kriglist)]
+        self.yall = np.zeros(shape=y_shape)
         for ii in range(np.size(self.yall,axis=1)):
             self.yall[:,ii] = self.kriglist[ii].KrigInfo["y"][:,0]
 
@@ -88,30 +136,24 @@ class MOBO:
         if self.autoupdate and disp:
             print(f"Update no.: {self.nup+1}, F-count: {np.size(self.Xall,0)}, "
                   f"Maximum no. updates: {self.moboInfo['nup']+1}")
-        else:
-            pass
 
         # If the optimizer is ParEGO, create a scalarized Kriging
         if self.moboInfo['acquifunc'].lower() == 'parego':
             self.KrigScalarizedInfo = deepcopy(self.kriglist[0].KrigInfo)
             self.KrigScalarizedInfo['y'] = paregopre(self.yall)
-            self.scalkrig = Kriging(self.KrigScalarizedInfo,standardization=True,standtype='default',normy=False,
+            self.scalkrig = Kriging(self.KrigScalarizedInfo,
+                                    standardization=True,
+                                    standtype='default',
+                                    normy=False,
                                     trainvar=False)
-            self.scalkrig.train(disp=False)
-        else:
-            pass
+            self.scalkrig.train(disp=False, pool=pool)
+
 
         # Perform update on design space
-        if self.moboInfo['acquifunc'].lower() in ('ehvi', 'ehvi_vec', 'ehvi_kmac3d'):
-            # Start pool at this level if no pool and n_cpu > 1
-            # self.ehviupdate(disp)
-            if self.moboInfo.get('n_cpu', 1) == 1:
-                self.ehviupdate(disp)
-            else:
-                with mp.Pool(processes=self.moboInfo['n_cpu']) as pool:
-                    self.ehviupdate(disp, pool=pool)
+        if self.moboInfo['acquifunc'].lower().startswith('ehvi'):
+            self.ehviupdate(disp, pool=pool)
         elif self.moboInfo['acquifunc'].lower() == 'parego':
-            self.paregoupdate(disp)
+            self.paregoupdate(disp, pool=pool)
         else:
             raise ValueError(self.moboInfo["acquifunc"], " is not a valid acquisition function.")
 
@@ -132,12 +174,15 @@ class MOBO:
         return xupdate,yupdate,supdate,metricall
 
 
-    def ehviupdate(self, disp, pool=None):
+    def ehviupdate(self, disp=True, pool=None):
         """
         Update MOBO using EHVI algorithm.
 
         Args:
-            disp (bool): Display process or not.
+            disp (bool, optional): Print progress. Defaults to True.
+            pool (int, optional): A multiprocessing.Pool instance.
+                Will be passed to functions for use, if specified.
+                Defaults to None.
 
         Returns:
              None
@@ -147,20 +192,30 @@ class MOBO:
         while self.nup < self.moboInfo['nup']:
             # Iteratively update the reference point for hypervolume computation if EHVI is used as the acquisition function
             if self.moboInfo['refpointtype'].lower() == 'dynamic':
-                self.moboInfo['refpoint'] = np.max(self.yall,0)+(np.max(self.yall,0)-np.min(self.yall,0))*2
+                rp = (np.max(self.yall, 0)
+                      + (np.max(self.yall, 0) - np.min(self.yall, 0)) * 2)
+                self.moboInfo['refpoint'] = rp
 
             # Perform update(s)
             if self.multiupdate < 0:
-                raise ValueError("Number of multiple update must be greater or equal to 0")
-            elif self.multiupdate == 0 or self.multiupdate == 1:
-                xnext, metricnext = run_multi_opt(self.kriglist, self.moboInfo, self.ypar, self.krigconstlist,
-                                                  self.cheapconstlist)
+                raise ValueError("Number of multiple update must be greater or "
+                                 "equal to 0")
+            elif self.multiupdate in (0, 1):
+                x_n, met_n = run_multi_opt(self.kriglist, self.moboInfo,
+                                           self.ypar,
+                                           krigconstlist=self.krigconstlist,
+                                           cheapconstlist=self.cheapconstlist,
+                                           pool=pool)
+                xnext = x_n
+                metricnext = met_n
                 yprednext = np.zeros(shape=[2])
                 sprednext = np.zeros(shape=[2])
                 for ii,krigobj in enumerate(self.kriglist):
-                    yprednext[ii], sprednext[ii] = krigobj.predict(xnext,['pred','s'])
+                    yprednext[ii], sprednext[ii] = krigobj.predict(xnext,
+                                                                   ['pred','s'])
             else:
-                xnext, yprednext, sprednext, metricnext = self.simultpredehvi(disp=disp, pool=pool)
+                res = self.simultpredehvi(disp=disp, pool=pool)
+                xnext, yprednext, sprednext, metricnext = res
 
             if self.nup == 0:
                 self.metricall = metricnext
@@ -177,7 +232,7 @@ class MOBO:
                 pass
 
             # Evaluate and enrich experimental design
-            self.enrich(xnext)
+            self.enrich(xnext, pool=pool)
 
             # Update number of iterations
             self.nup += 1
@@ -188,12 +243,15 @@ class MOBO:
                       f"Maximum no. updates: {self.moboInfo['nup']+1}")
 
 
-    def paregoupdate(self, disp):
+    def paregoupdate(self, disp=True, pool=None):
         """
         Update MOBO using ParEGO algorithm.
 
         Args:
-            disp (bool): Display process or not.
+            disp (bool, optional): Print progress. Defaults to True.
+            pool (int, optional): A multiprocessing.Pool instance.
+                Will be passed to functions for use, if specified.
+                Defaults to None.
 
         Returns:
              None
@@ -201,14 +259,20 @@ class MOBO:
         while self.nup < self.moboInfo['nup']:
             # Perform update(s)
             if self.multiupdate < 0:
-                raise ValueError("Number of multiple update must be greater or equal to 0")
-            elif self.multiupdate == 0 or self.multiupdate == 1:
-                xnext, metricnext = run_single_opt(self.scalkrig,self.moboInfo,self.krigconstlist,self.cheapconstlist)
+                raise ValueError("Number of multiple update must be greater or "
+                                 "equal to 0")
+            elif self.multiupdate in (0, 1):
+                x_n, met_n = run_single_opt(self.scalkrig, self.moboInfo,
+                                            krigconstlist=self.krigconstlist,
+                                            cheapconstlist=self.cheapconstlist,
+                                            pool=pool)
+                xnext = x_n
+                metricnext = met_n
                 yprednext = np.zeros(shape=[2])
                 for ii, krigobj in enumerate(self.kriglist):
                     yprednext[ii] = krigobj.predict(xnext, ['pred'])
             else:
-                xnext, yprednext, metricnext = self.simultpredparego()
+                xnext, yprednext, metricnext = self.simultpredparego(pool=pool)
 
             if self.nup == 0:
                 self.metricall = metricnext
@@ -216,22 +280,21 @@ class MOBO:
                 self.metricall = np.vstack((self.metricall,metricnext))
 
             # Break Loop if auto is false
-            if self.autoupdate is False:
+            if not self.autoupdate:
                 self.Xall = np.vstack((self.Xall, xnext))
                 self.yall = np.vstack((self.yall, yprednext))
                 break
-            else:
-                pass
 
             # Evaluate and enrich experimental design
-            self.enrich(xnext)
+            self.enrich(xnext, pool=pool)
 
             # Update number of iterations
             self.nup += 1
 
             # Show optimization progress
             if disp:
-                print(f"Update no.: {self.nup+1}, F-count: {np.size(self.Xall, 0)}, "
+                print(f"Update no.: {self.nup+1}, "
+                      f"F-count: {np.size(self.Xall, 0)}, "
                       f"Maximum no. updates: {self.moboInfo['nup']+1}")
 
 
@@ -240,8 +303,10 @@ class MOBO:
         Perform multi updates on EHVI MOBO using Kriging believer method.
 
         Args:
-            disp (bool, optional): Print updates. Defaults to False.
-            pool (mp.Pool, optional): An existing mp.Pool instance.
+            disp (bool, optional): Print progress. Defaults to True.
+            pool (int, optional): A multiprocessing.Pool instance.
+                Will be passed to functions for use, if specified.
+                Defaults to None.
 
         Returns:
              xalltemp (nparray) : Array of design variables updates.
@@ -302,9 +367,14 @@ class MOBO:
         return [xalltemp,yalltemp,salltemp,metricall]
 
 
-    def simultpredparego(self):
+    def simultpredparego(self, pool=None):
         """
         Perform multi updates on ParEGO MOBO by varying the weighting function.
+
+        Args:
+            pool (int, optional): A multiprocessing.Pool instance.
+                Will be passed to functions for use, if specified.
+                Defaults to None.
 
         Returns:
              xalltemp (nparray) : Array of design variables updates.
@@ -321,10 +391,15 @@ class MOBO:
             print(f"update number {ii + 1}")
             scalinfotemp['X'] = xalltemp
             scalinfotemp['y'] = paregopre(yalltemp,idx)
-            krigtemp = Kriging(scalinfotemp, standardization=True, standtype='default', normy=False,
-                               trainvar=False)
-            krigtemp.train(disp=False)
-            xnext, metricnext = run_single_opt(krigtemp,self.moboInfo,self.krigconstlist,self.cheapconstlist)
+            krigtemp = Kriging(scalinfotemp, standardization=True,
+                               standtype='default', normy=False, trainvar=False)
+            krigtemp.train(disp=False, pool=pool)
+            x_n, met_n = run_single_opt(krigtemp, self.moboInfo,
+                                        krigconstlist=self.krigconstlist,
+                                        cheapconstlist=self.cheapconstlist,
+                                        pool=pool)
+            xnext = x_n
+            metricnext = met_n
             for jj, krigobj in enumerate(self.kriglist):
                 yprednext[jj] = krigobj.predict(xnext, ['pred'])
             if ii == 0:
@@ -342,47 +417,53 @@ class MOBO:
         return xallnext, yallnext, metricall
 
 
-    def enrich(self,xnext):
+    def enrich(self, xnext, pool=None):
         """
         Evaluate and enrich experimental design.
 
         Args:
             xnext: Next design variable(s) to be evaluated.
+            pool (int, optional): A multiprocessing.Pool instance.
+                Will be passed to functions for use, if specified.
+                Defaults to None.
 
         Returns:
             None
         """
         # Evaluate new sample
-        if type(self.kriglist[0].KrigInfo['problem']) == str:
+        obj_krig_problem = self.kriglist[0].KrigInfo['problem']
+        if isinstance(obj_krig_problem, str):
             if np.ndim(xnext) == 1:
-                ynext = evaluate(xnext, self.kriglist[0].KrigInfo['problem'])
+                ynext = evaluate(xnext, obj_krig_problem)
             else:
                 ynext = np.zeros(shape=[np.size(xnext, 0), len(self.kriglist)])
                 for ii in range(np.size(xnext,0)):
-                    ynext[ii,:] = evaluate(xnext[ii,:],  self.kriglist[0].KrigInfo['problem'])
-        elif callable(self.kriglist[0].KrigInfo['problem']):
-            ynext = self.kriglist[0].KrigInfo['problem'](xnext)
+                    ynext[ii,:] = evaluate(xnext[ii,:],
+                                           obj_krig_problem)
+        elif callable(obj_krig_problem):
+            ynext = obj_krig_problem(xnext)
         else:
-            raise ValueError('KrigInfo["problem"] is not a string nor a callable function!')
+            raise ValueError('KrigInfo["problem"] is not a string nor a '
+                             'callable function!')
 
         if self.krigconstlist is not None:
             for idx, constobj in enumerate(self.krigconstlist):
-                if type(constobj.KrigInfo['problem']) == str:
-                    ynext_const = evaluate(xnext, constobj.KrigInfo['problem'])
-                elif callable(constobj.KrigInfo['problem']):
-                    ynext_const = constobj.KrigInfo['problem'](xnext).reshape(-1,1)
+                con_krig_problem = constobj.KrigInfo['problem']
+                if isinstance(con_krig_problem, str):
+                    ynext_const = evaluate(xnext, con_krig_problem)
+                elif callable(con_krig_problem):
+                    ynext_const = con_krig_problem(xnext).reshape(-1, 1)
                 else:
-                    raise ValueError('KrigConstInfo["problem"] is not a string nor a callable function!')
+                    raise ValueError('KrigConstInfo["problem"] is not a string '
+                                     'nor a callable function!')
                 constobj.KrigInfo['X'] = np.vstack((constobj.KrigInfo['X'], xnext))
                 constobj.KrigInfo['y'] = np.vstack((constobj.KrigInfo['y'], ynext_const))
                 constobj.standardize()
-                constobj.train(disp=False)
-        else:
-            pass
+                constobj.train(disp=False, pool=pool)
 
         # Treatment for failed solutions, Reference : "Forrester, A. I., SÃ³bester, A., & Keane, A. J. (2006). Optimization with missing data.
         # Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences, 462(2067), 935-945."
-        if np.isnan(ynext).any() is True:
+        if np.isnan(ynext).any():
             for jj in range(len(self.kriglist)):
                 SSqr, y_hat = self.kriglist[jj].predict(xnext, ['SSqr','pred'])
                 ynext[0,jj] = y_hat + SSqr
@@ -392,31 +473,34 @@ class MOBO:
         self.Xall = np.vstack((self.Xall, xnext))
         self.ypar,I = searchpareto.paretopoint(self.yall)  # Recompute non-dominated solutions
 
-        if self.moboInfo['acquifunc'] == 'ehvi':
+        if self.moboInfo['acquifunc'].lower().startswith('ehvi'):
             for index, krigobj in enumerate(self.kriglist):
                 krigobj.KrigInfo['X'] = self.Xall
                 krigobj.KrigInfo['y'] = self.yall[:,index].reshape(-1,1)
                 krigobj.standardize()
-                krigobj.train(disp=False)
+                krigobj.train(disp=False, pool=pool)
         elif self.moboInfo['acquifunc'] == 'parego':
             self.KrigScalarizedInfo['X'] = self.Xall
             self.KrigScalarizedInfo['y'] = paregopre(self.yall)
-            self.scalkrig = Kriging(self.KrigScalarizedInfo, standardization=True, standtype='default', normy=False,
-                               trainvar=False)
-            self.scalkrig.train(disp=False)
+            self.scalkrig = Kriging(self.KrigScalarizedInfo,
+                                    standardization=True, standtype='default',
+                                    normy=False, trainvar=False)
+            self.scalkrig.train(disp=False, pool=pool)
             for index, krigobj in enumerate(self.kriglist):
                 krigobj.KrigInfo['X'] = self.Xall
                 krigobj.KrigInfo['y'] = self.yall[:,index].reshape(-1,1)
                 krigobj.standardize()
-                krigobj.train(disp=False)
+                krigobj.train(disp=False, pool=pool)
         else:
-            raise ValueError(self.moboInfo["acquifunc"], " is not a valid acquisition function.")
+            raise NotImplementedError(self.moboInfo["acquifunc"],
+                                      " is not a valid acquisition function.")
 
         # Save data
         if self.savedata:
             I = I.astype(int)
             Xbest = self.Xall[I,:]
-            sio.savemat(self.moboInfo["filename"],{"xbest":Xbest,"ybest":self.ypar})
+            sio.savemat(self.moboInfo["filename"],
+                        {"xbest": Xbest, "ybest": self.ypar})
 
 
 def moboinfocheck(moboInfo, autoupdate, n_krig):

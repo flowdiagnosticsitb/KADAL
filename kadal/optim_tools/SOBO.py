@@ -5,33 +5,45 @@ from kadal.optim_tools.acquifunc_opt import run_single_opt
 
 
 class SOBO:
-    """
-    Perform single-objective Bayesian Optimization
+    """Perform single-objective Bayesian Optimization
 
     Args:
-        soboInfo (dict): Dictionary containing necessary information for single-objective Bayesian optimization.
-        krigobj (object): List of Kriging object.
-        autoupdate (bool): True or False, depends on your decision to evaluate your function automatically or not.
-        expconst (list): List of constraints Kriging object.
-        chpconst (list): List of cheap constraint function.
+        soboInfo (dict): A structure containing necessary information
+            for Bayesian optimization.
+        krigobj (kriging_model.Kriging): Objective Kriging instance.
+        autoupdate (bool): True or False, depends on your decision to
+            evaluate your function automatically or not.
+        expconst ([kriging_model.Kriging], optional): Kriging instances
+            for constraints. Defaults to None.
+        chpconst ([func], optional): Constraint functions. Defaults to
+            None. Expected output of the constraint functions is 1 if
+            satisfied and 0 if not. The constraint functions MUST have
+            an input of x (the decision variable to be evaluated).
 
     Returns:
-        xupdate (nparray): Matrix of updated samples after optimization.
-        yupdate (nparray): Response matrix of updated sample solutions after optimization.
+        xupdate (np.ndarray): Matrix of updated samples after
+            optimization.
+        yupdate (np.ndarray): Response matrix of updated sample
+            solutions after optimization.
     """
 
-    def __init__(
-        self, soboInfo, krigobj, autoupdate=True, expconst=None, chpconst=None
-    ):
-        """
-        Initialize SOBO class
+    def __init__(self, soboInfo, krigobj, autoupdate=True, expconst=None,
+                 chpconst=None):
+        """Initialize SOBO class
 
         Args:
-            soboInfo (dict): Dictionary containing necessary information for single-objective Bayesian optimization.
-            krigobj (object): List of Kriging object.
-            autoupdate (bool): True or False, depends on your decision to evaluate your function automatically or not.
-            expconst (list): List of constraints Kriging object.
-            chpconst (list): List of cheap constraint function.
+            soboInfo (dict): A structure containing necessary
+                information for Bayesian optimization.
+            krigobj (kriging_model.Kriging): Objective Kriging instance.
+            autoupdate (bool): True or False, depends on your decision
+                to evaluate your function automatically or not.
+            expconst ([kriging_model.Kriging], optional): Kriging
+                instances for constraints. Defaults to None.
+            chpconst ([func], optional): Constraint functions. Defaults
+                to None. Expected output of the constraint functions is
+                1 if satisfied and 0 if not. The constraint functions
+                MUST have an input of x (the decision variable to be
+                evaluated).
         """
         self.soboInfo = soboInfocheck(soboInfo, autoupdate)
         self.krigobj = krigobj
@@ -39,16 +51,41 @@ class SOBO:
         self.krigconstlist = expconst
         self.cheapconstlist = chpconst
 
-    def run(self, disp=True):
-        """
-        Run multi objective unconstrained Bayesian optimization.
+    def run(self, disp=True, n_cpu=1):
+        """Run multi objective unconstrained Bayesian optimization.
 
         Args:
-            disp (bool): Display process or not. Defaults to True
+            disp (bool, optional): Print progress. Defaults to True.
+            n_cpu (int, optional): The number of processors to use in a
+                multiprocessing.Pool. Default 1 will not run a pool.
 
         Returns:
-            xupdate (nparray): Array of design variables updates.
-            yupdate (nparray): Array of objectives updates
+            xupdate (np.ndarray): Matrix of updated samples after
+                optimization.
+            yupdate (np.ndarray): Response matrix of updated sample
+                solutions after optimization.
+        """
+        print(f'Running with n_cpu: {n_cpu} for supported functions.')
+        if n_cpu == 1:
+            return self._run(disp=disp, pool=None)
+        else:
+            with mp.Pool(processes=n_cpu) as pool:
+                return self._run(disp=disp, pool=pool)
+
+    def _run(self, disp=True, pool=None):
+        """Run multi objective unconstrained Bayesian optimization.
+
+        Args:
+            disp (bool, optional): Print progress. Defaults to True.
+            pool (int, optional): A multiprocessing.Pool instance.
+                Will be passed to functions for use, if specified.
+                Defaults to None.
+
+        Returns:
+            xupdate (np.ndarray): Matrix of updated samples after
+                optimization.
+            yupdate (np.ndarray): Response matrix of updated sample
+                solutions after optimization.
         """
         self.nup = 0  # Number of current iteration
         self.Xall = self.krigobj.KrigInfo["X"]
@@ -68,9 +105,12 @@ class SOBO:
                 pass
 
             # Find next suggested point
-            self.xnext, self.metricnext = run_single_opt(
-                self.krigobj, self.soboInfo, self.krigconstlist, self.cheapconstlist
-            )
+            x_n, metric_n = run_single_opt(self.krigobj, self.soboInfo,
+                                           krigconstlist=self.krigconstlist,
+                                           cheapconstlist=self.cheapconstlist,
+                                           pool=pool)
+            self.xnext = x_n
+            self.metricnext = metric_n
 
             # Break Loop if autoupdate is False
             if self.autoupdate is False:
@@ -79,28 +119,30 @@ class SOBO:
                 pass
 
             # Evaluate response for next decision variable
-            if type(self.krigobj.KrigInfo["problem"]) == str:
-                self.ynext = evaluate(self.xnext, self.krigobj.KrigInfo["problem"])
-            elif callable(self.krigobj.KrigInfo["problem"]):
-                self.ynext = self.krigobj.KrigInfo["problem"](self.xnext)
+            obj_krig_problem = self.krigobj.KrigInfo["problem"]
+            if isinstance(obj_krig_problem, str):
+                self.ynext = evaluate(self.xnext, obj_krig_problem)
+            elif callable(obj_krig_problem):
+                self.ynext = obj_krig_problem(self.xnext)
+            else:
+                raise ValueError('KrigInfo["problem"] is not a string nor a '
+                                 'callable function!')
 
             # Treatment for failed solutions, Reference : "Forrester, A. I., SÃ³bester, A., & Keane, A. J. (2006). Optimization with missing data.
             # Proceedings of the Royal Society A: Mathematical, Physical and Engineering Sciences, 462(2067), 935-945."
-            if np.isnan(self.ynext).any() is True:
+            if np.isnan(self.ynext).any():
                 SSqr, y_hat = self.krigobj.predict(self.xnext, ["SSqr", "pred"])
                 self.ynext = y_hat + SSqr
 
             # Enrich experimental design
-            self.krigobj.KrigInfo["X"] = np.vstack(
-                (self.krigobj.KrigInfo["X"], self.xnext)
-            )
-            self.krigobj.KrigInfo["y"] = np.vstack(
-                (self.krigobj.KrigInfo["y"], self.ynext)
-            )
+            self.krigobj.KrigInfo["X"] = np.vstack((self.krigobj.KrigInfo["X"],
+                                                    self.xnext))
+            self.krigobj.KrigInfo["y"] = np.vstack((self.krigobj.KrigInfo["y"],
+                                                    self.ynext))
 
             # Re-train Kriging model
             self.krigobj.standardize()
-            self.krigobj.train(disp=False)
+            self.krigobj.train(disp=False, pool=pool)
 
             if self.nup == 0:
                 self.xupdate = deepcopy(self.xnext)
@@ -110,15 +152,14 @@ class SOBO:
                 self.yupdate = np.vstack((self.yupdate, self.ynext))
 
             self.nup += 1
-            self.yhist = np.vstack((self.yhist, np.min(self.krigobj.KrigInfo["y"])))
+            self.yhist = np.vstack((self.yhist,
+                                    np.min(self.krigobj.KrigInfo["y"])))
 
             # Check stall iteration
             if self.yhist[self.nup, 0] == self.yhist[self.nup - 1, 0]:
                 self.istall += 1
                 if self.istall == self.soboInfo["stalliteration"]:
                     break
-                else:
-                    pass
             else:
                 self.istall = 0
 

@@ -163,15 +163,18 @@ class Kriging:
             self.KrigInfo["F"] = compute_regression_mat(self.KrigInfo["idx"], self.KrigInfo["X"], bound,
                                                         np.ones(shape=[self.KrigInfo["nvar"]]))
 
-    def train(self, n_cpu=1, disp=True, pre_theta=None):
+    def train(self, n_cpu=1, disp=True, pre_theta=None, pool=None):
         """
         Train Kriging model
         
         Args:
             n_cpu (bool): If > 1, uses parallel processing. Defaults
                 to 1.
-            disp (bool): Display process or not. Default to True.
-            
+            disp (bool, optional): Print updates. Defaults to False.
+            pre_theta #TODO: document this, if working.
+            pool (int, optional): A multiprocessing.Pool instance.
+                Will be passed to functions for use, if specified.
+                Defaults to None.
         Returns:
             None
         """
@@ -179,15 +182,13 @@ class Kriging:
             print("Begin train hyperparam.")
 
         # Isotropic gaussian kernel
-        if self.KrigInfo["kernel"] == ["iso_gaussian"]:
+        if self.KrigInfo["kernel"] == ["iso_gaussian"]:  # TODO: Should this be in a list?
             self.nbhyp = 1
         elif len(self.KrigInfo["kernel"]) != 1 and "iso_gaussian" in self.KrigInfo["kernel"]:
             raise NotImplementedError("Isotropic Gaussian kernel is not available for composite kernel")
         else:
             if len(self.KrigInfo["ubhyp"]) != self.nbhyp:
                 self.nbhyp = len(self.KrigInfo["ubhyp"])
-            else:
-                pass
 
         # Create multiple starting points
         if self.KrigInfo['nrestart'] < 1:
@@ -204,8 +205,6 @@ class Kriging:
         if pre_theta is not None:
             xhyp = np.random.rand(self.KrigInfo['nrestart']-1,len(self.KrigInfo["ubhyp"])) + pre_theta
             xhyp = np.vstack((pre_theta,xhyp))
-        else:
-            pass
 
         # Optimize hyperparam if number of hyperparameter is 1 using golden section method
         if self.nbhyp == 1:
@@ -242,7 +241,8 @@ class Kriging:
                 print(f"Training {self.KrigInfo['nrestart']} hyperparameter(s)")
 
             # Train hyperparams
-            bestxcand,neglnlikecand = self.parallelopt(xhyp,n_cpu,optimbound,disp)
+            bestxcand, neglnlikecand = self.parallelopt(xhyp, n_cpu, optimbound,
+                                                        disp=disp, pool=pool)
 
             # Search best hyperparams among the candidates
             I = np.argmin(neglnlikecand)
@@ -324,7 +324,7 @@ class Kriging:
         result = prediction(x,self.KrigInfo,predtypes=predtypes, drm=drmmodel)
         return result
 
-    def parallelopt(self,xhyp,n_cpu,optimbound,disp=True):
+    def parallelopt(self,xhyp, n_cpu, optimbound, disp=True, pool=None):
         """
         Optimize hyperparameter using parallel processing
 
@@ -332,6 +332,10 @@ class Kriging:
             xhyp (nparray): Array of starting points.
             n_cpu (int): If > 1, uses parallel processing.
             loglvl (str): level of logging function.
+            disp (bool, optional): Print progress to screen. Defaults
+                to False.
+            pool (mp.Pool, optional): A mp.Pool instance. If specified,
+                it will be used for multiprocessing (overrides n_cpu).
 
          Returns:
              bestxcand (nparray): Array of best X candidates for each starting points.
@@ -349,7 +353,7 @@ class Kriging:
         #     # No idea how many cores so just run sequentially
         #     skip_mp = True
 
-        if n_cpu > 1:
+        if n_cpu > 1 or pool is not None:
             # Calculate hyperparams in parallel
             print(f"Training in parallel on {n_cpu} cores.")
 
@@ -359,9 +363,12 @@ class Kriging:
                 hyperparam_inputs.append((self.KrigInfo, xhyp_ii, self.trainvar, self.KrigInfo['ubhyp'],
                                           self.KrigInfo['lbhyp'], self.sigmacmaes, self.scaling, optimbound))
 
-            with mp.Pool(n_cpu) as pool:
-                results = pool.starmap(tune_hyperparameters,
-                                       hyperparam_inputs)
+            if pool is None:
+                with mp.Pool(n_cpu) as pool:
+                    results = pool.starmap(tune_hyperparameters,
+                                           hyperparam_inputs)
+            else:
+                results = pool.starmap(tune_hyperparameters, hyperparam_inputs)
 
             # Collate results back into numpy arrays
             for i, (bestxcand_ii, neglnlikecand_ii) in enumerate(results):
