@@ -1,0 +1,7 @@
+Compile command: g++ -Ofast -o EHVI -std=c++0x -mtune=corei7 *.cc
+
+This is the updated version from Iris codes.
+
+Calculation for Expected Hyper-volume Improvement for 3D problem.
+
+

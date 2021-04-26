@@ -34,6 +34,8 @@ def uncGA (fitnessfcn, lb, ub, opt='min',disp=False,npop=300,maxg=200,args=None,
                 samplenorm[ij*nbatch:(ij+1)*nbatch, :] = np.random.normal(initialization[ij,:],
                                                                           np.std(args[1][0].KrigInfo['X_norm'],0)*0.2,
                                                                           (nbatch,nvar))
+            print('+++++Check this size! in uncGA.py', np.size(samplenorm[(ij + 1) * nbatch:, :], 0))
+            breakpoint()
             samplenorm[(ij+1)*nbatch:, :] = np.random.normal(initialization[(ij+1), :],
                                                              np.std(args[1][0].KrigInfo['X_norm'],0)*0.2,
                                                              (np.size(samplenorm[(ij+1)*nbatch:, :],0), nvar))
@@ -161,3 +163,363 @@ def uncGA (fitnessfcn, lb, ub, opt='min',disp=False,npop=300,maxg=200,args=None,
     #     print("X",i+1," = ",bestx[i])
 
     return (bestx,bestFitness,history)
+
+
+def uncGA_vec(fit_func, lb, ub, min_fit=True, disp=False, n_pop=300,
+              max_gen=200, p_mut=0.1, p_cross=0.95, rand_seed=0, args=None,
+              initialization=None, min_gen=50, min_fit_err=1e-2,
+              pool=None):
+    """[WIP] Fully Vectorised uncGA - currently returns wrong samples!!!
+
+    Vectorised crossover logic in this main loop is wrong.
+
+    Args:
+        fit_func (func): Function used to evaluate the fitness of an
+            individual.
+        lb (np.ndarray): n_dv-len array of lower bounds.
+        ub (np.ndarray): n_dv-len array of upper bounds.
+        min_fit (bool, optional): Minimise or maximise fitness.
+            Defaults to True (minimise fitness).
+        disp (bool, optional): Print progress. Defaults to False.
+        n_pop (int, optional): Population number. Defaults to 300.
+        max_gen (int, optional): Max generations. Defaults to 200.
+        p_mut (numeric, optional): Mutation probability. Between 0
+            and 1. Defaults to 0.1.
+        p_cross (numeric, optional): Crossover probability. Between 0
+            and 1. Defaults to 0.95.
+        rand_seed (int, optional): The seed for np.random.default_rng().
+            Defaults to 0.
+        args ([]/(), optional): Additional arguments passed to the
+            specified fit_func.
+        initialization (np.ndarray, optional): [n_pop, n_dv]
+            initialisation samples. Default None draws sobol_points().
+        min_gen (numeric, optional): The minimim number of generations,
+            if after which the percentage change in fitness error is
+            below the min_fit_err value, the optimisation stops.
+            Defaults to 50.
+        min_fit_err (numeric, optional): The percentage minimim fitness
+            error. Defaults to 1e-2.
+        pool (mp.Pool, optional): An existing mp.Pool instance can be
+            specified to reduce the overhead of starting a new mp.Pool
+            with every iteration.
+
+    Returns:
+        (best_x, best_fitness, history): A tuple of results, where:
+            best_x (np.ndarray): n_dv-len array of optimised design
+                variables.
+            best_fitness (float): The optimised fitness value
+            history (np.ndarray): [max_gen, 2] A history of the fitness
+                for each generation.
+    """
+    print('### WARNING: uncGA_vec is not currently working -> use uncGA2')
+    if args is None:
+        args = []
+    # only required for multi-objective function
+    if np.isscalar(ub):
+        n_dv = 1
+        ub = np.array([ub])
+        lb = np.array([lb])
+    else:
+        n_dv = len(ub)
+
+    history = np.zeros([max_gen, 2])
+
+    # Initialize population
+    if initialization is None:
+        # samplenorm = haltonsampling.halton(nvar, n_pop)
+        sample_norm = sobol_points(n_pop, n_dv)  # This is so slow!
+        initialization = (sample_norm * (ub - lb)) + lb
+
+    population = np.zeros(shape=[n_pop, n_dv + 1])
+    # population[:, :n_dv] = lb + (ub - lb) * random_sample(size=n_dv)
+    population[:, :n_dv] = initialization
+    population[:, n_dv] = fit_func(population[:, :n_dv], *args, pool=pool)
+
+    # Evolution loop
+    generation = 1
+    old_fitness = 0
+    best_x = None
+    best_fitness = None
+    rng = np.random.default_rng(rand_seed)
+    while generation <= max_gen:
+        # for generation 1:1
+        temp_pop = population.copy()
+
+        # Tournament Selection
+        # Unroll loop by pre-allocating valid list of indices!
+        # Set up pairs of random indices in semi-open interval [0, n_pop)
+        ip_1s = rng.integers(1, n_pop, size=n_pop)  # n_pop-len random index
+        ip_2s = rng.integers(1, n_pop, size=n_pop)  # n_pop-len random index
+
+        # For each random index pair ip_1 and ip_2, check not the same
+        ip_equal = ip_1s == ip_2s
+        while ip_equal.any():
+            # Find the index in ip_2 and replace with a new random index
+            i = np.where(ip_equal)[0]
+            new_ips = rng.integers(1, n_pop, size=len(i))
+            ip_2s[i] = new_ips
+            ip_equal = ip_1s == ip_2s
+
+        # Order the population according to pre-allocated 'random' indices
+        feat_1s = population[ip_1s, :n_dv]
+        feat_2s = population[ip_2s, :n_dv]
+        fit_1s = population[ip_1s, n_dv]
+        fit_2s = population[ip_2s, n_dv]
+
+        if min_fit:
+            fit_mask = fit_1s < fit_2s
+        else:
+            fit_mask = fit_1s > fit_2s
+
+        mating_pool = np.zeros([n_pop, n_dv])
+        mating_pool[np.where(fit_mask)[0], :] = feat_1s[fit_mask]
+        mating_pool[np.where(~fit_mask)[0], :] = feat_2s[~fit_mask]
+
+        # Crossover with tournament selection
+        # Stepping through pairs, so only need array length of half population
+        idx_1s = rng.integers(1, n_pop, size=int(np.ceil(n_pop / 2)))
+        idx_2s = rng.integers(1, n_pop, size=int(np.ceil(n_pop / 2)))
+
+        # For each random index pair ip_1 and ip_2, check not the same
+        ip_equal = idx_1s == idx_2s
+        while ip_equal.any():
+            # Find the index in ip_2 and replace with a new random index
+            i = np.where(ip_equal)[0]
+            new_ips = rng.integers(1, n_pop, size=len(i))
+            idx_2s[i] = new_ips
+            ip_equal = idx_1s == idx_2s
+
+        # Run for pairs of samples less than probability of crossover
+        p_rand = rng.random(size=int(np.floor(n_pop / 2)))  # random floats for crossover
+        cross_mask = p_rand < p_cross
+        ix = np.where(cross_mask)[0]
+        parent_1s = mating_pool[idx_1s[ix], :]
+        parent_2s = mating_pool[idx_2s[ix], :]
+        child_1s, child_2s = SBX.sbx_vec(parent_1s, parent_2s, lb, ub,
+                                         rand_seed=rand_seed)
+
+        temp_pop[ix, :n_dv] = child_1s
+        temp_pop[ix + 1, :n_dv] = child_2s
+
+        # For others, just copy design vars from mating pool
+        ix = np.where(~cross_mask)[0]
+        temp_pop[ix, :n_dv] = mating_pool[idx_1s[ix], :]
+        temp_pop[ix + 1, :n_dv] = mating_pool[idx_2s[ix], :]
+
+        # Eval fitness of population
+        temp_pop[:, n_dv] = fit_func(temp_pop[:, :n_dv], *args, pool=pool)
+
+        # Combined Population for Elitism
+        total_pop = np.vstack((population, temp_pop))
+
+        # Sort Population based on their fitness value
+        if min_fit:
+            i = np.argsort(total_pop[:, n_dv])
+        else:
+            i = np.argsort(total_pop[:, n_dv])[::-1]
+
+        total_pop = total_pop[i, :]
+
+        # Record Optimum Solution
+        best_fitness = total_pop[0, n_dv]
+        best_x = total_pop[0, :n_dv]
+
+        # Mutation
+        total_pop[1:, :n_dv] = mutation.gaussmut_vec(total_pop[1:, :n_dv].copy(),
+                                                     p_mut, ub, lb, rand_seed)
+        total_pop[1:, n_dv] = fit_func(total_pop[1:, :n_dv].copy(), *args,
+                                       pool=pool)
+
+        history[generation - 1, 0] = generation
+        history[generation - 1, 1] = best_fitness
+
+        fit_err = 100 * np.abs(best_fitness - old_fitness) / best_fitness
+
+        if disp:
+            print("GA: generation ", generation, " | Best X = ", best_x,
+                  " | Fitness Error (%)= ", fit_err)
+
+        generation = generation + 1
+        if fit_err <= min_fit_err and generation >= min_gen:
+            break
+
+        # Next Population
+        population[:] = total_pop[:n_pop, :].copy()
+        old_fitness = best_fitness
+
+    return best_x, best_fitness, history
+
+
+def uncGA2(fit_func, lb, ub, min_fit=True, disp=False, n_pop=300, max_gen=200,
+           p_mut=0.1, p_cross=0.95, args=None, initialization=None,
+           min_gen=50, min_fit_err=1e-2, pool=None):
+    """A more efficient implementation of unGA.
+
+    Tidied and 'pythonised' version of the original uncGA
+    implementation - loops have been left in place.
+
+    Wherever possible, the fitness function is evaluated with a
+    processing pool, if specified.
+
+    Only vectorises the obvious things and calls the vectorised
+    implementations of mutation, crossover (which are checked and
+    correct). Also exposes more of the settings, which should be
+    user tunable. Except, there is still a mystery setting in
+    SBX which is hardcoded.
+
+    # TODO: Check SBX hard-coded value!
+
+    Args:
+        fit_func (func): Function used to evaluate the fitness of an
+            individual.
+        lb (np.ndarray): n_dv-len array of lower bounds.
+        ub (np.ndarray): n_dv-len array of upper bounds.
+        min_fit (bool, optional): Minimise or maximise fitness.
+            Defaults to True (minimise fitness).
+        disp (bool, optional): Print progress. Defaults to False.
+        n_pop (int, optional): Population number. Defaults to 300.
+        max_gen (int, optional): Max generations. Defaults to 200.
+        p_mut (numeric, optional): Mutation probability. Between 0
+            and 1. Defaults to 0.1.
+        p_cross (numeric, optional): Crossover probability. Between 0
+            and 1. Defaults to 0.95.
+        args ([]/(), optional): Additional arguments passed to the
+            specified fit_func.
+        initialization (np.ndarray, optional): [n_pop, n_dv]
+            initialisation samples. Default None draws sobol_points().
+        min_gen (numeric, optional): The minimim number of generations,
+            if after which the percentage change in fitness error is
+            below the min_fit_err value, the optimisation stops.
+            Defaults to 50.
+        min_fit_err (numeric, optional): The percentage minimim fitness
+            error. Defaults to 1e-2.
+        pool (mp.Pool, optional): An existing mp.Pool instance can be
+            specified to reduce the overhead of starting a new mp.Pool
+            with every iteration.
+
+    Returns:
+        best_x (np.ndarray): n_dv-len array of optimised design
+            variables.
+        best_fitness (float): The optimised fitness value.
+        history (np.ndarray): [max_gen, 2] A history of the fitness
+            for each generation.
+    """
+    if args is None:
+        args = []
+    # only required for multi-objective fcn
+    if np.isscalar(ub):
+        n_dv = 1
+        ub = np.array([ub])
+        lb = np.array([lb])
+    else:
+        n_dv = len(ub)
+
+    # Initialize population
+    if initialization is None:
+        # samplenorm = haltonsampling.halton(nvar, n_pop)
+        sample_norm = sobol_points(n_pop, n_dv)  # This is so slow!
+        initialization = (sample_norm * (ub - lb)) + lb
+
+    population = np.zeros(shape=[n_pop, n_dv + 1])
+    population[:, :n_dv] = initialization
+    population[:, n_dv] = fit_func(population[:, :n_dv], *args, pool=pool)
+
+    # Evolution loop
+    history = np.zeros([max_gen, 2])
+    generation = 1
+    old_fitness = 0
+    best_x = None
+    best_fitness = None
+    # rng = np.random.default_rng(rand_seed)
+    while generation <= max_gen:
+        # for generation 1:1
+        temp_pop = deepcopy(population)
+
+        # Tournament Selection
+        mating_pool = np.zeros([n_pop, n_dv])
+
+        for kk in range(0, n_pop):
+            ip_1 = int(np.ceil(n_pop * random_sample()))  # random number 1
+            ip_2 = int(np.ceil(n_pop * random_sample()))  # random number 2
+            while ip_1 >= n_pop or ip_2 >= n_pop:
+                ip_1 = int(np.ceil(n_pop * random_sample()))
+                ip_2 = int(np.ceil(n_pop * random_sample()))
+            # In case random number 1 = random number 2
+            if ip_2 == ip_1:
+                while ip_2 == ip_1 or ip_2 >= n_pop:
+                    ip_2 = int(np.ceil(n_pop * random_sample()))
+
+            feature_1 = population[ip_1, :n_dv]
+            feature_2 = population[ip_2, :n_dv]
+            fit_1 = population[ip_1, n_dv]
+            fit_2 = population[ip_2, n_dv]
+
+            if not min_fit:
+                if fit_1 > fit_2:
+                    mating_pool[kk, :] = feature_1
+                else:
+                    mating_pool[kk, :] = feature_2
+            else:
+                if fit_1 < fit_2:
+                    mating_pool[kk, :] = feature_1
+                else:
+                    mating_pool[kk, :] = feature_2
+
+        # Crossover with tournament selection
+        for jj in range(0, n_pop, 2):
+            idx_1 = int(np.ceil(n_pop * random_sample()))
+            idx_2 = int(np.ceil(n_pop * random_sample()))
+            while idx_1 >= n_pop or idx_2 >= n_pop or idx_1 == idx_2:
+                idx_1 = int(np.ceil(n_pop * random_sample()))
+                idx_2 = int(np.ceil(n_pop * random_sample()))
+            if random_sample() < p_cross:
+                child = SBX.SBX(mating_pool[idx_1, :],mating_pool[idx_2, :],
+                                n_dv, lb, ub)
+                temp_pop[jj, :n_dv] = child[0, :]
+                temp_pop[jj + 1, :n_dv] = child[1, :]
+            else:
+                temp_pop[jj, 0:n_dv] = mating_pool[idx_1, :]
+                temp_pop[jj + 1, 0:n_dv] = mating_pool[idx_2, :]
+
+            temp_pop[jj:jj+2, n_dv] = fit_func(temp_pop[jj:jj+2, :n_dv],
+                                               *args, pool=pool)
+
+        # Combined Population for Elitism
+        total_pop = np.vstack((population, temp_pop))
+
+        # Sort Population based on their fitness value
+        if min_fit:
+            i = np.argsort(total_pop[:, n_dv])
+        else:
+            i = np.argsort(total_pop[:, n_dv])[::-1]
+        total_pop = total_pop[i, :]
+
+        # Record Optimum Solution
+        best_fitness = total_pop[0, n_dv]
+        best_x = total_pop[0, :n_dv]
+
+        # Mutation
+        for kk in range(1, (2 * n_pop)):
+            total_pop[kk, :n_dv] = mutation.gaussmut(total_pop[kk, :n_dv],
+                                                     n_dv, p_mut, ub, lb)
+            total_pop[kk, n_dv] = fit_func(total_pop[kk, :n_dv], *args,
+                                           pool=pool)
+
+        history[generation - 1, 0] = generation
+        history[generation - 1, 1] = best_fitness
+
+        fit_err = 100 * np.abs(best_fitness - old_fitness) / best_fitness
+
+        if disp:
+            print("GA: generation ", generation, " | Best X = ", best_x,
+                  " | Fitness Error (%)= ", fit_err)
+
+        generation = generation + 1
+        if fit_err <= min_fit_err and generation >= min_gen:
+            break
+
+        # Next Population
+        population[:] = total_pop[:n_pop, :].copy()
+        old_fitness = best_fitness
+
+    return best_x, best_fitness, history
