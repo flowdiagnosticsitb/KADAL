@@ -2,18 +2,7 @@
 
 Author: Tim Jim, Tohoku University
 
-Scoll down and check the n_cpu that you want to use.
-
-If > 1, make sure to export the relevant flags to limit 
-1 thread per process if you are using MKL or BLAS numpy
-to avoid oversubscription,
-
-i.e. one or some of:
-
-    export OPENBLAS_NUM_THREADS=1
-    export OMP_NUM_THREADS=1
-    export MKL_NUM_THREADS=1
-    export NUMEXPR_NUM_THREADS=1
+Scroll down and check the n_cpu that you want to use.
 
 Then run using:
     python mobo_3d.py test3d
@@ -22,6 +11,11 @@ Or:
     OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 python mobo_3d.py test3d
 
 """
+import os
+# Set a single thread per process for numpy with MKL/BLAS
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_DEBUG_CPU_TYPE'] = '5'
 import sys
 import time
 import argparse
@@ -33,13 +27,11 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
+from kadal.surrogate_models.kriging_model import Kriging
+from kadal.surrogate_models.supports.initinfo import initkriginfo
+from kadal.optim_tools.MOBO import MOBO
+
 import constraints as cons
-
-sys.path.insert(0, '/opt/kadal/KADAL/kadal')
-from surrogate_models.kriging_model import Kriging
-from surrogate_models.supports.initinfo import initkriginfo
-from optim_tools.MOBO import MOBO
-
 
 class Problem:
 
@@ -246,13 +238,15 @@ class Problem:
         with open(out_pkl, 'wb') as f:
             pickle.dump(self, f)
 
-    def update_sample(self, mobo_info, n_kb=5):
+    def update_sample(self, mobo_info, n_kb=5, n_cpu=1):
         # infeasiblesamp = np.where(self.cldat <= 0.15)[0]
         mobo = MOBO(mobo_info, self.obj_krig, autoupdate=False,
                     multiupdate=n_kb, savedata=False,
                     expconst=self.con_krig, chpconst=self.h)
         start_update = time.time()
-        xupdate, yupdate, supdate, metricall = mobo.run(disp=True, infeasible=None)
+        xupdate, yupdate, supdate, metricall = mobo.run(disp=True,
+                                                        infeasible=None,
+                                                        n_cpu=n_cpu)
         elapsed = time.time() - start_update
         print(f'Total update time: {elapsed:.2f} seconds')
         self.total_update_time = elapsed
@@ -440,7 +434,7 @@ if __name__ == '__main__':
         optim = Problem(X, y, dv_min, dv_max, x_labels=geom_params, y_labels=objectives, h=h)
         optim.create_krig(obj_krig_map=obj_krig_map, con_krig_map=None, n_cpu=n_cpu)
         optim.save_state(out_pkl)
-    xupdate, yupdate, supdate, metricall = optim.update_sample(update_info, n_kb)
+    xupdate, yupdate, supdate, metricall = optim.update_sample(update_info, n_kb, n_cpu=n_cpu)
     elapsed = time.time() - t_opt
 
     print(f'Total optimisation time: {elapsed/60:.2f} mins')

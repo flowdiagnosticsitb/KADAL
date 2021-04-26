@@ -1,25 +1,31 @@
+import time
 import numpy as np
+import matplotlib.pyplot as plt
+
 from kadal.misc.sampling.samplingplan import realval
 from kadal.testcase.RA.testcase import evaluate
-import matplotlib.pyplot as plt
-import time
 
 
 class AKMCS:
-    """
-    Create AK-MCS model (Active Kriging - Monte Carlo Simulation) for reliability analysis
+    """Create AK-MCS model for reliability analysis
+
+    (Active Kriging - Monte Carlo Simulation)
 
     Args:
-        krigobj (object): Kriging object for AKMCS analysis
-        akmcsInfo (dict): Dictionary that contains AKMCS model information.
-            detail akmcsInfo:
-                - akmcsInfo["init_samp"] (nparray): Initial Monte-Carlo population
-                - akmcsInfo["maxupdate"] (int): Maximum number of update. Defaults to 120
-                - akmcsInfo["problem"] (str): Type of case
+        krigobj (kriging_model.Kriging): Kriging object for AKMCS
+            analysis.
+        akmcsInfo (dict): Dictionary that contains AKMCS model
+            information, with the items:
+
+            akmcsInfo["init_samp"] (np.ndarray): Initial Monte-Carlo
+                population.
+            akmcsInfo["maxupdate"] (int): Maximum number of updates.
+                Defaults to 120.
+            akmcsInfo["problem"] (str): Type of case.
 
     Returns:
-        updatedX (nparray): updated samples.
-        minUiter (nparray): minimum U value for each iteration
+        updatedX (np.ndarray): updated samples.
+        minUiter (np.ndarray): minimum U value for each iteration
     """
 
     def __init__(self, krigobj, akmcsInfo):
@@ -27,12 +33,16 @@ class AKMCS:
         Initialize akmcs
 
         Args:
-            krigobj (object): Kriging object for AKMCS analysis
-            akmcsInfo (dict): Dictionary that contains AKMCS model information.
-                detail akmcsInfo:
-                    - akmcsInfo["init_samp"] (nparray): Initial Monte-Carlo population
-                    - akmcsInfo["maxupdate"] (int): Maximum number of update. Defaults to 120
-                    - akmcsInfo["problem"] (str): Type of case
+        krigobj (kriging_model.Kriging): Kriging object for AKMCS
+            analysis.
+        akmcsInfo (dict): Dictionary that contains AKMCS model
+            information, with the keys:
+
+                akmcsInfo["init_samp"] (np.ndarray): Initial
+                    Monte-Carlo population.
+                akmcsInfo["maxupdate"] (int): Maximum number of updates.
+                    Defaults to 120.
+                akmcsInfo["problem"] (str): Type of case.
         """
         akmcsInfo = akmcsInfocheck(akmcsInfo)
         self.krigobj = krigobj
@@ -41,7 +51,7 @@ class AKMCS:
         self.maxupdate = akmcsInfo["maxupdate"]
         self.nsamp = np.size(self.init_samp, axis=0)
         self.Gx = np.zeros(shape=[self.nsamp, 1])
-        self.sigmaG = np.zeros(shape=[1, self.nsamp])
+        self.sigmaG = np.zeros(shape=[self.nsamp, 1])
         self.stop_criteria = 100  # assign large number
         self.logging = None
 
@@ -81,24 +91,20 @@ class AKMCS:
         # Split init_samp to avoid memory error
         krig_initsamp = self.krigobj.KrigInfo["X"]
         t1 = time.time()
-        if self.nsamp < 10000:
-            self.Gx, self.sigmaG = self.krigobj.predict(self.init_samp, ["pred", "s"])
-        else:
-            run_times = int(np.ceil(self.nsamp / 10000))
-            for i in range(run_times):
-                start = i * 10000
+
+        run_times = int(np.ceil(self.nsamp / 10000))
+        for i in range(run_times):
+            start = i * 10000
+            if i != (run_times - 1):
                 stop = (i + 1) * 10000
-                if i != (run_times - 1):
-                    (
-                        self.Gx[start:stop, :],
-                        self.sigmaG[:, start:stop],
-                    ) = self.krigobj.predict(
-                        self.init_samp[start:stop, :], ["pred", "s"]
-                    )
-                else:
-                    self.Gx[start:, :], self.sigmaG[:, start:] = self.krigobj.predict(
-                        self.init_samp[start:, :], ["pred", "s"]
-                    )
+            else:
+                stop = self.nsamp
+
+            init_samp = self.init_samp[start:stop, :]
+            gx, sigmag = self.krigobj.predict(init_samp, ["pred", "s"])
+            self.Gx[start:stop, :] = gx
+            self.sigmaG[start:stop, :] = sigmag
+
         t2 = time.time()
 
         # Calculate probability of failure
@@ -115,7 +121,7 @@ class AKMCS:
         # Update samples automatically
         while autoupdate:
             labeladded = False
-            for i in range(self.maxupdate):
+            for i_update in range(self.maxupdate):
                 # Evaluate new samples and append into Kriging object information
                 t = time.time()
                 ynew = evaluate(self.xnew, type=self.akmcsInfo["problem"])
@@ -135,31 +141,21 @@ class AKMCS:
 
                 # Calculate Gx and SigmaG
                 # Split init_samp to avoid memory error
-                if self.nsamp < 10000:
-                    self.Gx, self.sigmaG = self.krigobj.predict(
-                        self.init_samp, ["pred", "s"]
-                    )
-                else:
-                    run_times = int(np.ceil(self.nsamp / 10000))
-                    for ii in range(run_times):
-                        start = ii * 10000
+                run_times = int(np.ceil(self.nsamp / 10000))
+                for ii in range(run_times):
+                    start = ii * 10000
+                    if ii != (run_times - 1):
                         stop = (ii + 1) * 10000
-                        if ii != (run_times - 1):
-                            (
-                                self.Gx[start:stop, :],
-                                self.sigmaG[:, start:stop],
-                            ) = self.krigobj.predict(
-                                self.init_samp[start:stop, :], ["pred", "s"]
-                            )
-                        else:
-                            (
-                                self.Gx[start:, :],
-                                self.sigmaG[:, start:],
-                            ) = self.krigobj.predict(
-                                self.init_samp[start:, :], ["pred", "s"]
-                            )
+                    else:
+                        stop = self.nsamp
+
+                    init_samp = self.init_samp[start:stop, :]
+                    gx, sigmag = self.krigobj.predict(init_samp, ["pred", "s"])
+                    self.Gx[start:stop, :] = gx
+                    self.sigmaG[start:stop, :] = sigmag
 
                 t5 = time.time()
+
                 # Calculate Pf, COV and LFU
                 self.Pf = self.pfcalc()
                 self.cov = self.covpf()
@@ -172,10 +168,9 @@ class AKMCS:
                 self.minUiter = np.vstack((self.minUiter, self.minU))
                 elapsed = time.time() - t
                 if disp:
-                    print(
-                        f"iter no: {i+1}, Pf: {self.Pf}, stopcrit: {self.stop_criteria}, time(s): {elapsed}, "
-                        f"ynew: {ynew}"
-                    )
+                    print(f"iter no: {i_update+1}, Pf: {self.Pf}, "
+                          f"stopcrit: {self.stop_criteria}, "
+                          f"time(s): {elapsed}, ynew: {ynew}")
 
                 if logging:
                     self.logging.log_parameter(
@@ -186,11 +181,11 @@ class AKMCS:
                         "stopcrit": self.stop_criteria,
                         "time(s)": elapsed,
                     }
-                    self.logging.log_metrics(outdict, step=i + 1)
+                    self.logging.log_metrics(outdict, step=i_update + 1)
 
                 if savedatato is not None:
-                    temparray = np.array([i, self.Pf, self.stop_criteria, elapsed])
-                    if i == 0:
+                    temparray = np.array([i_update, self.Pf, self.stop_criteria, elapsed])
+                    if i_update == 0:
                         totaldata = temparray[:]
                     else:
                         totaldata = np.vstack((totaldata, temparray))
@@ -205,7 +200,7 @@ class AKMCS:
                     pass
 
                 if saveimageto is not None:
-                    imagefile = saveimageto + str(i) + ".PNG"
+                    imagefile = saveimageto + str(i_update) + ".PNG"
                     title = "Pf = " + str(self.Pf)
                     plt.figure(0, figsize=[10, 9])
                     if not labeladded:
@@ -257,7 +252,7 @@ class AKMCS:
                     pass
 
                 # Break condition
-                if self.stop_criteria <= 0.05 and i >= 15:
+                if self.stop_criteria <= 0.05 and i_update >= 15:
                     break
                 else:
                     pass
@@ -328,9 +323,8 @@ def mcpopgen(
         pop = np.random.gumbel(mean, beta, (nmc, ndim))
     elif type.lower() == "random":
         if lb.any() == None or ub.any() == None:
-            raise ValueError(
-                "type 'random' is selected, please input lower bound and upper bound value"
-            )
+            raise ValueError("type 'random' is selected, please input lower "
+                             "bound and upper bound value")
         else:
             pop = realval(lb, ub, np.random.rand(nmc, len(lb)))
     else:
@@ -339,15 +333,16 @@ def mcpopgen(
 
 
 def akmcsInfocheck(akmcsInfo):
-    """
-    Function to check the AKMCS information and set AKMCS Information to default value if
-    required parameters are not supplied.
+    """ Helper function to check the AKMCS dictionary.
+
+    Checks akmcsInfo dict and sets default values, if required
+    parameters are not supplied.
 
     Args:
-        akmcsInfo: Dictionary that contains AKMCS information.
+        akmcsInfo (dict): Dictionary that contains AKMCS information.
 
     Returns:
-        akmcsInfo: Checked/Modified AKMCS Information
+        akmcsInfo: Checked/Modified AKMCS Information.
     """
     if "init_samp" not in akmcsInfo:
         raise ValueError('akmcsInfo["init_samp"] must be defined')

@@ -65,6 +65,7 @@ def EHVI(x,ypar,moboInfo,kriglist):
 def pool_predict(pool, x, kriglist):
     """Helper function for multiprocessing Kriging.predict().
 
+    # TODO Generalise this kind of func for all the predict stuff in KADAL
     N.B. Might want to inline this later once everything else
     is optimised.
 
@@ -147,7 +148,7 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
         hv (np.ndarray/float): n_pop-len array of hypervolumes for each
             samp, if input x is 2D. If input x is a 1D input array,
             n_pop = 1 is assumed and all inputs are design variables;
-            a single hv float is returned (legacy behaviour).
+            a single EHVI float is returned (legacy behaviour).
     """
     reshape = False
     if x.ndim == 1:
@@ -186,7 +187,7 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
 
 
 def ehvicalc_kmac3d(x, y_par, moboInfo, kriglist, pool=None):
-    """Calculate 3D EHVI using Leiden Uni's KMAC c++ code.
+    """Calculate 3D EHVI using Leiden Uni's KMAC C++ code.
 
     Uses the multi 'sliceupdate' mode.
 
@@ -205,7 +206,7 @@ def ehvicalc_kmac3d(x, y_par, moboInfo, kriglist, pool=None):
         hv (np.ndarray/float): n_pop-len array of hypervolumes for each
             samp, if input x is 2D. If input x is a 1D input array,
             n_pop = 1 is assumed and all inputs are design variables;
-            a single hv float is returned (legacy behaviour).
+            a single EHVI float is returned (legacy behaviour).
         """
     reshape = False
     if x.ndim == 1:

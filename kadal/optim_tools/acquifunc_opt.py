@@ -36,8 +36,8 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
 
     Args:
         krigobj (kriging_model.Kriging): Objective Kriging instance.
-        soboInfo (dict): A structure containing necessary information for
-            Bayesian optimization.
+        soboInfo (dict): A structure containing necessary information
+            for Bayesian optimization.
         krigconstlist ([kriging_model.Kriging], optional): Kriging
             instances for constraints. Defaults to None.
         cheapconstlist ([func], optional): Constraint functions.
@@ -61,8 +61,8 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
     if acquifunc.lower() == 'parego':
         acquifunc = soboInfo['paregoacquifunc']
     else:
-        msg = "Only soboInfo['acquifunc'] = 'parego' is currently handled"
-        raise NotImplementedError(msg)
+        # Seems like string is passed stright to prediction.prediction
+        pass
 
     n_restart = soboInfo["nrestart"]
     n_var = krigobj.KrigInfo["nvar"]
@@ -127,8 +127,9 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
 
         if pool is not None:
             workers = pool.map
-            # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
-            soboInfo['n_cpu'] = 1
+            # TODO: Check - we shouldn't need this fix anymore
+            # # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
+            # soboInfo['n_cpu'] = 1
         else:
             workers = 1  # Default DE flag
 
@@ -332,8 +333,9 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
 
         if pool is not None:
             workers = pool.map
-            # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
-            moboInfo['n_cpu'] = 1
+            # TODO: Check - we shouldn't need this fix anymore
+            # # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
+            # moboInfo['n_cpu'] = 1
         else:
             workers = 1  # Default DE flag
 
@@ -392,8 +394,15 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
 
         args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist, None, 'inf')
         func = PackagedFunc(multiconstfun, args)
-        logger = fcmaes.optimizer.logger()
-        optimizer = fcmaes.optimizer.de_cma_py(max_evaluations=fc_kwargs['max_evaluations'],
+        logger = fc_kwargs.get('logger', None)
+        if isinstance(logger, str):
+            logger = fcmaes.optimizer.logger(logger)
+        elif isinstance(logger, bool):
+            if logger:
+                logger = fcmaes.optimizer.logger()
+
+
+        optimizer = fcmaes.optimizer.de_cma(max_evaluations=fc_kwargs['max_evaluations'],
                                                popsize=fc_kwargs['popsize'],
                                                stop_fitness=fc_kwargs['stop_fitness'])
 
@@ -455,6 +464,8 @@ def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
     """
     # Calculate unconstrained acquisition function
     metric = krigobj.predict(x, acquifunc)
+    if np.ndim(metric) == 0:
+        metric = np.array(metric).reshape(1, -1)
 
     # Check if 1D feature array -> temporarily convert to 2D array.
     reshape = False
@@ -513,7 +524,7 @@ def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
 
     # Give a penalty to zero metric for some solvers
     if mode is not None:
-        replace_zero(metric, mode)
+        replace_zero(fx, mode)
 
     # If input was 1D feature array return single float
     if reshape:
@@ -630,7 +641,7 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
 
     # Give a penalty to zero metric for some solvers
     if mode is not None:
-        replace_zero(metric, mode)
+        replace_zero(fx, mode)
 
     # If input was 1D feature array return single float
     if reshape:
@@ -638,26 +649,26 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
     return fx
 
 
-def replace_zero(hv, mode):
+def replace_zero(metric, mode):
     """Helper function to modify zero values in an array.
 
     Args:
-        hv (np.ndarray): An array of values. Modified in-place.
+        metric (np.ndarray): An array of values. Modified in-place.
         mode (str): ['tiny'/'inf'] The replacement method. If 'tiny'
             is specified, zeros are replaced with a positive value
             near np.finfo("float").tiny. If 'inf', then zeros are
             replaced with np.inf.
     """
-    z = hv == 0  # mask of values = 0
+    z = metric == 0  # mask of values = 0
     if mode == 'tiny':
         # give penalty to HV, to avoid error in CMA-ES when all HV = 0
         rng = np.random.default_rng()
-        hv[z] = rng.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100,
-                            size=np.count_nonzero(z))
+        metric[z] = rng.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100,
+                                size=np.count_nonzero(z))
     elif mode == 'inf':
         # Scipy differential evolution does not like tiny values near zero
         # https://github.com/scipy/scipy/issues/13784
-        hv[z] = np.inf
+        metric[z] = np.inf
     else:
         raise ValueError("mode flag must be set to 'tiny' or 'inf'.")
 

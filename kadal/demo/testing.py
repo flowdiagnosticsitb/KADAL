@@ -1,19 +1,25 @@
-import sys
+import os
+# Set a single thread per process for numpy with MKL/BLAS
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_DEBUG_CPU_TYPE'] = '5'
 
-sys.path.insert(0, "..")
-import numpy as np
-from surrogate_models.kriging_model import Kriging
-from surrogate_models.supports.initinfo import initkriginfo
-from copy import deepcopy
-from optim_tools import searchpareto
-from misc.sampling.samplingplan import sampling, standardize
-from optim_tools.acquifunc_opt import multiconstfun
-from optim_tools.MOBO import MOBO
 import time
-from matplotlib import pyplot as plt
-from misc.constfunc import sweepdiffcheck
-from misc.constfunc import constraints_check
+import numpy as np
 import pandas as pd
+from copy import deepcopy
+from matplotlib import pyplot as plt
+
+from kadal.optim_tools.MOBO import MOBO
+from kadal.optim_tools import searchpareto
+from kadal.optim_tools.acquifunc_opt import multiconstfun
+from kadal.surrogate_models.kriging_model import Kriging
+from kadal.surrogate_models.supports.initinfo import initkriginfo
+from kadal.misc.sampling.samplingplan import sampling, standardize
+
+#TODO: This file needs tidying - there is no kadal.misc.constfunc
+from kadal.misc.constfunc import sweepdiffcheck
+from kadal.misc.constfunc import constraints_check
 
 
 class Problem:
@@ -70,7 +76,7 @@ class Problem:
             normy=False,
             trainvar=False,
         )
-        # self.krigobj1.train(parallel=False)
+        # self.krigobj1.train(n_cpu=n_cpu)
         # loocverrCD, _ = self.krigobj1.loocvcalc(metrictype='r2')
 
         self.krigobj2 = Kriging(
@@ -80,7 +86,7 @@ class Problem:
             normy=False,
             trainvar=False,
         )
-        # self.krigobj2.train(parallel=False)
+        # self.krigobj2.train(n_cpu=n_cpu)
         # loocverrNOISE, _ = self.krigobj2.loocvcalc(metrictype='r2')
 
         self.krigconst = Kriging(
@@ -90,7 +96,7 @@ class Problem:
             normy=False,
             trainvar=False,
         )
-        # self.krigconst.train(parallel=False)
+        # self.krigconst.train(n_cpu=n_cpu)
         # loocverrCL, _ = self.krigconst.loocvcalc(metrictype='r2')
 
         # print('LOOCV CD (r2): ', loocverrCD)
@@ -99,7 +105,7 @@ class Problem:
 
         # # Create Kriging for Area (uncomment if needed)
         # self.krigarea = Kriging(KrigAreaInfo, standardization=True, standtype='default', normy=False, trainvar=False)
-        # self.krigarea.train(parallel=False)
+        # self.krigarea.train(n_cpu=n_cpu)
         # loocverrAREA, _ = self.krigarea.loocvcalc()
 
         self.kriglist = [self.krigobj1, self.krigobj2]

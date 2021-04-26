@@ -1,22 +1,25 @@
-import sys
+import os
+# Set a single thread per process for numpy with MKL/BLAS
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_DEBUG_CPU_TYPE'] = '5'
 
-sys.path.insert(0, "/home/ghifariadamf/disk_d/research/KADAL")
+import time
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib import cm
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+# from matplotlib import cmmatplotlib.pyplot as pfrom mpl_toolkits.mplot3d import Axes3D
+
 from kadal.surrogate_models.kriging_model import Kriging
 from kadal.surrogate_models.kpls_model import KPLS
 from kadal.misc.sampling.samplingplan import sampling, realval, standardize
 from kadal.testcase.analyticalfcn.cases import evaluate
 from kadal.surrogate_models.supports.initinfo import initkriginfo
-from matplotlib import cm
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import time
-
-# from matplotlib import cmmatplotlib.pyplot as pfrom mpl_toolkits.mplot3d import Axes3D
 
 
-def generate_kriging():
+def generate_kriging(n_cpu):
     # Initialization
     KrigInfo = dict()
     kernel = ["gaussian"]
@@ -58,7 +61,7 @@ def generate_kriging():
     krigobj = Kriging(
         KrigInfo, standardization=True, standtype="default", normy=False, trainvar=False
     )
-    krigobj.train(parallel=False)
+    krigobj.train(n_cpu=n_cpu)
     loocverr, _ = krigobj.loocvcalc()
     elapsed = time.time() - t
     print("elapsed time for train Kriging model: ", elapsed, "s")
@@ -116,5 +119,6 @@ def predictkrig(krigobj):
 
 
 if __name__ == "__main__":
-    krigingobj1 = generate_kriging()
+    n_cpu = 12
+    krigingobj1 = generate_kriging(n_cpu)
     predictkrig(krigingobj1)
