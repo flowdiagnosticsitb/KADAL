@@ -128,7 +128,7 @@ def prediction(x, KrigInfo, predtypes, num=None, drm=None, **kwargs):
 
     # If vector, turn into 1D array
     if x.ndim == 1:
-        x = np.array([x])
+        x = x.reshape(1, -1)
 
     # # Is this extra check necessary?
     # if KrigInfo['multiobj'] is True and 'num' in KrigInfo:
@@ -310,7 +310,7 @@ def prediction(x, KrigInfo, predtypes, num=None, drm=None, **kwargs):
             output = ProbFeas
         else:
             msg = f"Specified prediction type: '{pred}' is not recognised."
-            raise ValueError(msg)
+            raise NotImplementedError(msg)
         outputs.append(output)
 
     # If only one output specified, try to return as single value or array.

@@ -1,12 +1,17 @@
-import sys
-sys.path.insert(0, "..")
+import os
+# Set a single thread per process for numpy with MKL/BLAS
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_DEBUG_CPU_TYPE'] = '5'
+
 import numpy as np
+from matplotlib import pyplot as plt
+from copy import deepcopy
+
+from kadal.optim_tools.MOBO import MOBO
 from kadal.surrogate_models.kriging_model import Kriging
 from kadal.surrogate_models.supports.initinfo import initkriginfo
 from kadal.misc.sampling.samplingplan import sampling
-from matplotlib import pyplot as plt
-from kadal.optim_tools.MOBO import MOBO
-from copy import deepcopy
 
 def cust_func(x):
     x1 = x[:,0]
@@ -34,7 +39,7 @@ def exp_const_eval(x):
     g = (x1-8)**2 + (x2 + 3)**2
     return g
 
-def construct_krig(X, y, g, lb, ub):
+def construct_krig(X, y, g, lb, ub, n_cpu):
     # Define input for constraint Kriging
     KrigConstInfo = initkriginfo()
     KrigConstInfo['X'] = X
@@ -62,16 +67,19 @@ def construct_krig(X, y, g, lb, ub):
     KrigInfo2['y'] = y[:,1].reshape(-1,1)
 
     # Run Kriging
-    krigobj1 = Kriging(KrigInfo1, standardization=True, standtype='default', normy=False, trainvar=False)
-    krigobj1.train(parallel=False)
+    krigobj1 = Kriging(KrigInfo1, standardization=True, standtype='default',
+                       normy=False, trainvar=False)
+    krigobj1.train(n_cpu=n_cpu)
     loocverr1, _ = krigobj1.loocvcalc()
 
-    krigobj2 = Kriging(KrigInfo2, standardization=True, standtype='default', normy=False, trainvar=False)
-    krigobj2.train(parallel=False)
+    krigobj2 = Kriging(KrigInfo2, standardization=True, standtype='default',
+                       normy=False, trainvar=False)
+    krigobj2.train(n_cpu=n_cpu)
     loocverr2, _ = krigobj2.loocvcalc()
 
-    krigconst = Kriging(KrigConstInfo, standardization=True, standtype='default', normy=False, trainvar=False)
-    krigconst.train(parallel=False)
+    krigconst = Kriging(KrigConstInfo, standardization=True, standtype='default',
+                        normy=False, trainvar=False)
+    krigconst.train(n_cpu=n_cpu)
     loocverrConst, _ = krigconst.loocvcalc()
 
     print('LOOCV 1: ', loocverr1)
@@ -90,8 +98,8 @@ def optimize(kriglist, expconstlist):
     moboInfo['acquifunc'] = "ehvi"
     moboInfo['acquifuncopt'] = "diff_evo"
     cheapconstlist = [cheap_const]
-    mobo = MOBO(moboInfo, kriglist, autoupdate=True, multiupdate=5, expconst=expconstlist,
-                chpconst = cheapconstlist)
+    mobo = MOBO(moboInfo, kriglist, autoupdate=True, multiupdate=5,
+                expconst=expconstlist, chpconst = cheapconstlist)
     xupdate, yupdate, supdate, metricall = mobo.run(disp=True)
     return xupdate, yupdate, supdate, metricall
 
@@ -102,7 +110,9 @@ if __name__ == '__main__':
     lb = np.array([0, 0])
     ub = np.array([5, 3])
     sampoption = "halton"
-    samplenorm, sample = sampling(sampoption, nvar, nsample, result="real", upbound=ub, lobound=lb)
+    n_cpu = 12
+    samplenorm, sample = sampling(sampoption, nvar, nsample, result="real",
+                                  upbound=ub, lobound=lb)
     X = sample
 
     # Evaluate function
@@ -110,7 +120,7 @@ if __name__ == '__main__':
     g = exp_const_eval(X)
 
     # Create Kriging
-    kriglist, expconstlist = construct_krig(X, y, g, lb, ub)
+    kriglist, expconstlist = construct_krig(X, y, g, lb, ub, n_cpu)
 
     # Optimize
     xupdate, yupdate, supdate, metricall = optimize(kriglist, expconstlist)

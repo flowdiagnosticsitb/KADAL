@@ -1,14 +1,20 @@
-import sys
-sys.path.insert(0, "..")
+import os
+# Set a single thread per process for numpy with MKL/BLAS
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_DEBUG_CPU_TYPE'] = '5'
+
 import numpy as np
+from matplotlib import pyplot as plt
+from copy import deepcopy
+
+from kadal.optim_tools.MOBO import MOBO
 from kadal.surrogate_models.kriging_model import Kriging
 from kadal.surrogate_models.supports.initinfo import initkriginfo
 from kadal.misc.sampling.samplingplan import sampling
-from matplotlib import pyplot as plt
-from kadal.optim_tools.MOBO import MOBO
-from copy import deepcopy
 
-def generate_kriging():
+
+def generate_kriging(n_cpu):
     # Sampling
     nsample = 20
     nvar = 2
@@ -16,7 +22,8 @@ def generate_kriging():
     lb = -1 * np.ones(shape=[nvar])
     ub = 1 * np.ones(shape=[nvar])
     sampoption = "halton"
-    samplenorm, sample = sampling(sampoption, nvar, nsample, result="real", upbound=ub, lobound=lb)
+    samplenorm, sample = sampling(sampoption, nvar, nsample, result="real",
+                                  upbound=ub, lobound=lb)
     X = sample
     # Evaluate sample
     global y
@@ -38,13 +45,15 @@ def generate_kriging():
     KrigInfo2['y'] = y[:,1].reshape(-1,1)
 
     # Run Kriging
-    krigobj1 = Kriging(KrigInfo1, standardization=True, standtype='default', normy=False, trainvar=False)
-    krigobj1.train(parallel=False)
+    krigobj1 = Kriging(KrigInfo1, standardization=True, standtype='default',
+                       normy=False, trainvar=False)
+    krigobj1.train(n_cpu=n_cpu)
     loocverr1, _ = krigobj1.loocvcalc()
     print("LOOCV error of Kriging model: ", loocverr1, "%")
 
-    krigobj2 = Kriging(KrigInfo2, standardization=True, standtype='default', normy=False, trainvar=False)
-    krigobj2.train(parallel=False)
+    krigobj2 = Kriging(KrigInfo2, standardization=True, standtype='default',
+                       normy=False, trainvar=False)
+    krigobj2.train(n_cpu=n_cpu)
     loocverr2, _ = krigobj2.loocvcalc()
     print("LOOCV error of Kriging model: ", loocverr2, "%")
 
@@ -57,10 +66,10 @@ def runopt(krigobj1, krigobj2):
     moboInfo["acquifunc"] = "ehvi"
     moboInfo["acquifuncopt"] = "lbfgsb"
 
-    Optim = MOBO(moboInfo,[krigobj1,krigobj2],autoupdate=True,multiupdate=5)
-    xupdate,yupdate,supdate,metricall = Optim.run(disp=True)
+    Optim = MOBO(moboInfo, [krigobj1, krigobj2], autoupdate=True, multiupdate=5)
+    xupdate, yupdate, supdate, metricall = Optim.run(disp=True)
 
-    return xupdate,yupdate,metricall
+    return xupdate, yupdate, metricall
 
 def myproblem(x):
     r = 1
@@ -76,10 +85,11 @@ def myproblem(x):
     return f
 
 if __name__ == '__main__':
-    krigobj1, krigobj2 = generate_kriging()
-    xupdate,yupdate,metricall = runopt(krigobj1,krigobj2)
+    n_cpu = 12
+    krigobj1, krigobj2 = generate_kriging(n_cpu)
+    xupdate, yupdate, metricall = runopt(krigobj1, krigobj2)
 
     print(metricall)
-    plt.scatter(y[:,0],y[:,1])
+    plt.scatter(y[:, 0], y[:, 1])
     plt.scatter(yupdate[:, 0], yupdate[:, 1])
     plt.show()

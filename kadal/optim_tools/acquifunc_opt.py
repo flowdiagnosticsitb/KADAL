@@ -36,8 +36,8 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
 
     Args:
         krigobj (kriging_model.Kriging): Objective Kriging instance.
-        soboInfo (dict): A structure containing necessary information for
-            Bayesian optimization.
+        soboInfo (dict): A structure containing necessary information
+            for Bayesian optimization.
         krigconstlist ([kriging_model.Kriging], optional): Kriging
             instances for constraints. Defaults to None.
         cheapconstlist ([func], optional): Constraint functions.
@@ -61,8 +61,8 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
     if acquifunc.lower() == 'parego':
         acquifunc = soboInfo['paregoacquifunc']
     else:
-        msg = "Only soboInfo['acquifunc'] = 'parego' is currently handled"
-        raise NotImplementedError(msg)
+        # Seems like string is passed stright to prediction.prediction
+        pass
 
     n_restart = soboInfo["nrestart"]
     n_var = krigobj.KrigInfo["nvar"]
@@ -127,8 +127,9 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
 
         if pool is not None:
             workers = pool.map
-            # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
-            soboInfo['n_cpu'] = 1
+            # TODO: Check - we shouldn't need this fix anymore
+            # # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
+            # soboInfo['n_cpu'] = 1
         else:
             workers = 1  # Default DE flag
 
@@ -332,8 +333,9 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
 
         if pool is not None:
             workers = pool.map
-            # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
-            moboInfo['n_cpu'] = 1
+            # TODO: Check - we shouldn't need this fix anymore
+            # # If MP, set n_cpu to 1 to stop pool in EHVI - pass in existing pool
+            # moboInfo['n_cpu'] = 1
         else:
             workers = 1  # Default DE flag
 
@@ -379,7 +381,54 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
         xnext = xnextcand[I, :]
         fnext = fnextcand[I]
 
-    return xnext,fnext
+    elif acquifuncopt.lower() == 'fcmaes':
+        # Delayed import as fcmaes is not installed by default
+        import fcmaes.advretry
+        import fcmaes.optimizer
+        # Load fast-cmaes settings from fc_kwargs dict, if present
+        fc_kwargs = moboInfo.get('fc_kwargs', {})
+        fc_kwargs['max_evaluations'] = fc_kwargs.get('max_evaluations', 1500)
+        fc_kwargs['popsize'] = fc_kwargs.get('popsize', 31)
+        fc_kwargs['stop_fitness'] = fc_kwargs.get('stop_fitness', -np.inf)
+        optimbound = list(zip(low_bound, up_bound))
+
+        args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist, None, 'inf')
+        func = PackagedFunc(multiconstfun, args)
+        logger = fc_kwargs.get('logger', None)
+        if isinstance(logger, str):
+            logger = fcmaes.optimizer.logger(logger)
+        elif isinstance(logger, bool):
+            if logger:
+                logger = fcmaes.optimizer.logger()
+
+
+        optimizer = fcmaes.optimizer.de_cma(max_evaluations=fc_kwargs['max_evaluations'],
+                                               popsize=fc_kwargs['popsize'],
+                                               stop_fitness=fc_kwargs['stop_fitness'])
+
+        xnextcand = np.zeros(shape=[n_restart, n_var])
+        fnextcand = np.zeros(shape=[n_restart])
+
+        for im in range(n_restart):
+            r_t = time.time()
+            res = fcmaes.advretry.minimize(func.eval, optimbound,
+                                           optimizer=optimizer,
+                                           logger=logger,
+                                           **fc_kwargs)
+
+            xnextcand[im, :] = res.x
+            fnextcand[im] = res.fun
+            print_res(r_t, res.fun, res.x, success=res.success,
+                      n_eval=res.nfev, i_restart=im, n_restart=n_restart)
+
+        I = np.argmin(fnextcand)
+        xnext = xnextcand[I, :]
+        fnext = fnextcand[I]
+    else:
+        msg = f"Requested acquifuncopt '{acquifuncopt}' is not available."
+        raise NotImplementedError(msg)
+
+    return xnext, fnext
 
 
 def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
@@ -415,6 +464,8 @@ def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
     """
     # Calculate unconstrained acquisition function
     metric = krigobj.predict(x, acquifunc)
+    if np.ndim(metric) == 0:
+        metric = np.array(metric).reshape(1, -1)
 
     # Check if 1D feature array -> temporarily convert to 2D array.
     reshape = False
@@ -473,7 +524,7 @@ def singleconstfun(x, krigobj, acquifunc, krigconstlist=None,
 
     # Give a penalty to zero metric for some solvers
     if mode is not None:
-        replace_zero(metric, mode)
+        replace_zero(fx, mode)
 
     # If input was 1D feature array return single float
     if reshape:
@@ -590,7 +641,7 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
 
     # Give a penalty to zero metric for some solvers
     if mode is not None:
-        replace_zero(metric, mode)
+        replace_zero(fx, mode)
 
     # If input was 1D feature array return single float
     if reshape:
@@ -598,26 +649,26 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
     return fx
 
 
-def replace_zero(hv, mode):
+def replace_zero(metric, mode):
     """Helper function to modify zero values in an array.
 
     Args:
-        hv (np.ndarray): An array of values. Modified in-place.
+        metric (np.ndarray): An array of values. Modified in-place.
         mode (str): ['tiny'/'inf'] The replacement method. If 'tiny'
             is specified, zeros are replaced with a positive value
             near np.finfo("float").tiny. If 'inf', then zeros are
             replaced with np.inf.
     """
-    z = hv == 0  # mask of values = 0
+    z = metric == 0  # mask of values = 0
     if mode == 'tiny':
         # give penalty to HV, to avoid error in CMA-ES when all HV = 0
         rng = np.random.default_rng()
-        hv[z] = rng.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100,
-                            size=np.count_nonzero(z))
+        metric[z] = rng.uniform(np.finfo("float").tiny, np.finfo("float").tiny * 100,
+                                size=np.count_nonzero(z))
     elif mode == 'inf':
         # Scipy differential evolution does not like tiny values near zero
         # https://github.com/scipy/scipy/issues/13784
-        hv[z] = np.inf
+        metric[z] = np.inf
     else:
         raise ValueError("mode flag must be set to 'tiny' or 'inf'.")
 
@@ -669,3 +720,36 @@ def efficientsamp(kriglist, y_par, n_pop=300, std_scale=0.2):
                         kriglist[0].KrigInfo["ub"],
                         samplenorm)
     return init_seed
+
+
+class PackagedFunc:
+    """Helper class for fcmaes/pygmo-type optimisers."""
+    def __init__(self, func, args):
+        """Package constraint func and args into accessible class.
+
+        For some optimizers, we can't pass in args directly to fully
+        specify the fitness function. This class packs the args into
+        an instance variable which can be accessed at evaluation time.
+
+        In the place of original 'func', do:
+
+             p_func = PackagedFunc(func, args)
+
+        and pass in:
+
+            p_func.eval
+
+        as the fitness function.
+
+        Args:
+            func (callable): The function to be optimised with the
+                signature func(x, *args)
+            args (tuple/list): A list of tuple of arguments passed
+                to func.
+        """
+        self.func = func
+        self.args = args
+
+    def eval(self, x):
+        """The surrogate fitness function."""
+        return self.func(x, *self.args)

@@ -2,18 +2,7 @@
 
 Author: Tim Jim, Tohoku University
 
-Scoll down and check the n_cpu that you want to use.
-
-If > 1, make sure to export the relevant flags to limit 
-1 thread per process if you are using MKL or BLAS numpy
-to avoid oversubscription,
-
-i.e. one or some of:
-
-    export OPENBLAS_NUM_THREADS=1
-    export OMP_NUM_THREADS=1
-    export MKL_NUM_THREADS=1
-    export NUMEXPR_NUM_THREADS=1
+Scroll down and check the n_cpu that you want to use.
 
 Then run using:
     python mobo_3d.py test3d
@@ -22,6 +11,11 @@ Or:
     OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 python mobo_3d.py test3d
 
 """
+import os
+# Set a single thread per process for numpy with MKL/BLAS
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_DEBUG_CPU_TYPE'] = '5'
 import sys
 import time
 import argparse
@@ -33,13 +27,11 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
+from kadal.surrogate_models.kriging_model import Kriging
+from kadal.surrogate_models.supports.initinfo import initkriginfo
+from kadal.optim_tools.MOBO import MOBO
+
 import constraints as cons
-
-sys.path.insert(0, '/opt/kadal/KADAL/kadal')
-from surrogate_models.kriging_model import Kriging
-from surrogate_models.supports.initinfo import initkriginfo
-from optim_tools.MOBO import MOBO
-
 
 class Problem:
 

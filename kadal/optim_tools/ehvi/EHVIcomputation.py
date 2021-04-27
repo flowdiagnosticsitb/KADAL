@@ -3,9 +3,12 @@ from kadal.optim_tools.ehvi.exi2d import exi2d
 try:
     from kadal.extern.HDYE_3D_Update import kmac
 except ImportError as e:
+    import pathlib
+    f_path = pathlib.Path(__file__).parent
+    lib_path = (f_path / '../../extern/HDYE_3D_Update').resolve()
     msg = (f"{e}\n\nKMAC library has probably not been compiled for this "
-           f"python version yet. Go to above path and run 'cmake .; make'. "
-           f"You may need to check the paths in 'CMakeLists.txt' first.")
+           f"python version yet. Go to:\n{lib_path}\nand run 'cmake . && make'."
+           f" You may need to check the paths in 'CMakeLists.txt' first.")
     raise ImportError(msg)
 
 
@@ -62,6 +65,7 @@ def EHVI(x,ypar,moboInfo,kriglist):
 def pool_predict(pool, x, kriglist):
     """Helper function for multiprocessing Kriging.predict().
 
+    # TODO Generalise this kind of func for all the predict stuff in KADAL
     N.B. Might want to inline this later once everything else
     is optimised.
 
@@ -144,7 +148,7 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
         hv (np.ndarray/float): n_pop-len array of hypervolumes for each
             samp, if input x is 2D. If input x is a 1D input array,
             n_pop = 1 is assumed and all inputs are design variables;
-            a single hv float is returned (legacy behaviour).
+            a single EHVI float is returned (legacy behaviour).
     """
     reshape = False
     if x.ndim == 1:
@@ -183,7 +187,7 @@ def ehvicalc_vec(x, y_par, moboInfo, kriglist, pool=None):
 
 
 def ehvicalc_kmac3d(x, y_par, moboInfo, kriglist, pool=None):
-    """Calculate 3D EHVI using Leiden Uni's KMAC c++ code.
+    """Calculate 3D EHVI using Leiden Uni's KMAC C++ code.
 
     Uses the multi 'sliceupdate' mode.
 
@@ -202,7 +206,7 @@ def ehvicalc_kmac3d(x, y_par, moboInfo, kriglist, pool=None):
         hv (np.ndarray/float): n_pop-len array of hypervolumes for each
             samp, if input x is 2D. If input x is a 1D input array,
             n_pop = 1 is assumed and all inputs are design variables;
-            a single hv float is returned (legacy behaviour).
+            a single EHVI float is returned (legacy behaviour).
         """
     reshape = False
     if x.ndim == 1:

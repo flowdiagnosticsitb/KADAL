@@ -1,24 +1,29 @@
-import sys
-sys.path.insert(0, "..")
+import os
+# Set a single thread per process for numpy with MKL/BLAS
+os.environ['MKL_NUM_THREADS'] = '1'
+os.environ['OPENBLAS_NUM_THREADS'] = '1'
+os.environ['MKL_DEBUG_CPU_TYPE'] = '5'
+
+import time
 import numpy as np
+import matplotlib.pyplot as plt
+
 from kadal.testcase.RA.testcase import evaluate
 from kadal.reliability_analysis.akmcs import mcpopgen
 from kadal.surrogate_models.kriging_model import Kriging
 from kadal.surrogate_models.kpls_model import KPLS
 from kadal.surrogate_models.supports.initinfo import initkriginfo
 from kadal.sensitivity_analysis.sobol_ind import SobolIndices as SobolI
-import matplotlib.pyplot as plt
-import time
 
 
-def generate_krig(lb,ub, n_krigsamp, nvar,problem):
+def generate_krig(lb,ub, n_krigsamp, nvar, problem, n_cpu):
     init_krigsamp = mcpopgen(lb=lb,ub=ub,ndim=2,n_order=1,n_coeff=3)
     print("Evaluating Kriging Sample")
     ykrig = problem(init_krigsamp)
     print(np.count_nonzero(ykrig <= 0))
 
     # Set Kriging Info
-    KrigInfo = initkriginfo("single")
+    KrigInfo = initkriginfo(1)
     KrigInfo["X"] = init_krigsamp
     KrigInfo["y"] = ykrig
     KrigInfo["nvar"] = nvar
@@ -33,7 +38,7 @@ def generate_krig(lb,ub, n_krigsamp, nvar,problem):
     drm = None
     t = time.time()
     krigobj = Kriging(KrigInfo, standardization=True, standtype='default', normy=False, trainvar=False)
-    krigobj.train(parallel=False)
+    krigobj.train(n_cpu=n_cpu)
     loocverr, _ = krigobj.loocvcalc()
     elapsed = time.time() - t
     print("elapsed time to train Kriging model: ", elapsed, "s")
@@ -157,10 +162,12 @@ if __name__ == '__main__':
     nvar = 2
     n_krigsamp = 50
     problem = cust
+    n_cpu = 12
 
     # Create Kriging model
     t = time.time()
-    krigobj,loocverr,drm= generate_krig(lb,ub,n_krigsamp,nvar,problem)
+    krigobj, loocverr, drm = generate_krig(lb, ub, n_krigsamp, nvar, problem,
+                                           n_cpu)
     ktime = time.time() - t
     # Predict and UQ
     pred(krigobj,init_samp,problem,drmmodel=drm)
