@@ -238,13 +238,15 @@ class Problem:
         with open(out_pkl, 'wb') as f:
             pickle.dump(self, f)
 
-    def update_sample(self, mobo_info, n_kb=5):
+    def update_sample(self, mobo_info, n_kb=5, n_cpu=1):
         # infeasiblesamp = np.where(self.cldat <= 0.15)[0]
         mobo = MOBO(mobo_info, self.obj_krig, autoupdate=False,
                     multiupdate=n_kb, savedata=False,
                     expconst=self.con_krig, chpconst=self.h)
         start_update = time.time()
-        xupdate, yupdate, supdate, metricall = mobo.run(disp=True, infeasible=None)
+        xupdate, yupdate, supdate, metricall = mobo.run(disp=True,
+                                                        infeasible=None,
+                                                        n_cpu=n_cpu)
         elapsed = time.time() - start_update
         print(f'Total update time: {elapsed:.2f} seconds')
         self.total_update_time = elapsed
@@ -432,7 +434,7 @@ if __name__ == '__main__':
         optim = Problem(X, y, dv_min, dv_max, x_labels=geom_params, y_labels=objectives, h=h)
         optim.create_krig(obj_krig_map=obj_krig_map, con_krig_map=None, n_cpu=n_cpu)
         optim.save_state(out_pkl)
-    xupdate, yupdate, supdate, metricall = optim.update_sample(update_info, n_kb)
+    xupdate, yupdate, supdate, metricall = optim.update_sample(update_info, n_kb, n_cpu=n_cpu)
     elapsed = time.time() - t_opt
 
     print(f'Total optimisation time: {elapsed/60:.2f} mins')
