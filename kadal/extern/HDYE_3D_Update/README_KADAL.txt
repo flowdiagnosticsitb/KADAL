@@ -11,12 +11,22 @@ Modifications and pybind11 wrapper coded by Tim Jim, Tohoku University
 ########################################################################
 
 TL;DR --> install like this:
+   ## UNIX
    ($ activate kadal_env / $ conda activate kadal_env)  # if necessary
    $ pip install pybind11 / $ conda install -c conda-forge pybind11
    $ cmake .
    $ make
    $ python test_single.py
 
+   ## WINDOWS
+   # Activate your venv if necessary
+   # Download and Install cmake if you don't have any
+   > pip install pybind11 / > conda install -c conda-forge pybind11
+   # Make sure that your CMake\bin and pybind11Config.cmake PATH have already set in the Environment PATH
+   > cmake .
+   > cmake --build . --config Release --target cmake
+   # This will generate cmake.cp36-win_amd64.pyd under `Release` directory, copy this file up to one level.
+   > python test_single.py  # perform test
 
 ########################################################################
 
