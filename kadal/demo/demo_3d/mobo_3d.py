@@ -7,10 +7,14 @@ Scroll down and check the n_cpu that you want to use.
 Then run using:
     python mobo_3d.py test3d
 
-Or:
-    OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 python mobo_3d.py test3d
+For flag help, run:
+    python mobo_3d.py --help
 
+Last updated: 30/04/2021
 """
+__author__ = "Tim Jim"
+__version__ = '1.0.0'
+
 import os
 # Set a single thread per process for numpy with MKL/BLAS
 os.environ['MKL_NUM_THREADS'] = '1'
@@ -34,6 +38,10 @@ from kadal.optim_tools.MOBO import MOBO
 import constraints as cons
 
 class Problem:
+    """A class to help setup and definie an optimisation problem.
+
+    Example useage can be senn at the bottom of the script.
+    """
 
     def __init__(self, X, y, dv_min, dv_max, g=None, x_labels=None,
                  y_labels=None, g_labels=None, h=None):
@@ -234,11 +242,21 @@ class Problem:
         # loocverrAREA, _ = self.krigarea.loocvcalc()
 
     def save_state(self, out_pkl):
+        """Save Problem instance to pickle file."""
         print(f'Saving problem to: {out_pkl}')
         with open(out_pkl, 'wb') as f:
             pickle.dump(self, f)
 
     def update_sample(self, mobo_info, n_kb=5, n_cpu=1):
+        """Run multi-objective optimization/update.
+
+        Args:
+            mobo_info (dict): KADAL-style input dictionary.
+            n_kb (int, optional): Requested number of Kriging Believer
+                samples to search for. Defaults to 5.
+            n_cpu (int, optional): If > 1, uses parallel processing, if
+                supported. Defaults to 1.
+        """
         # infeasiblesamp = np.where(self.cldat <= 0.15)[0]
         mobo = MOBO(mobo_info, self.obj_krig, autoupdate=False,
                     multiupdate=n_kb, savedata=False,
@@ -255,6 +273,47 @@ class Problem:
         self.supdate.append(supdate)
         self.metricall.append(metricall)
         return xupdate, yupdate, supdate, metricall
+
+    def export_update(self, out_csv, i_update=-1, opt_cycle=None,
+                      cycle_header='Cycle'):
+        """Export the update results to a CSV.
+
+        The aquisition function value column is labelled 'metric' and
+        uncertainty values are the x_labels and y_labels prepended with
+        's_'.
+
+        Args:
+            out_csv (PathLike): Output CSV path.
+            i_update (int, optional): Index for which results to export.
+                Defaults to -1, where the last update is output.
+            opt_cycle (str, optional): Optional leading column with the
+                current optimisation cycle. Default None does not add a
+                column.
+            cycle_header (str, optional): The column header, used if
+                opt_cycle is not None. Defaults to 'Cycle'.
+        """
+        # output headers and cycle column
+        headers = [] if opt_cycle is None else [cycle_header]
+        headers.extend(self.x_labels + self.y_labels + ['metric']
+                        + [f's_{o}' for o in self.y_labels])
+        header = ','.join(headers)
+
+        # Stack data for CSV output
+        x_up = self.xupdate[i_update]
+        y_up = self.yupdate[i_update]
+        metric = self.metricall[i_update]
+        supdate = self.supdate[i_update]
+
+        if opt_cycle is None:
+            update = np.hstack((x_up, y_up, metric, supdate))
+        else:
+            n_kb = x_up.shape[0]
+            cycle = np.array([opt_cycle] * n_kb).reshape(-1, 1)
+            update = np.hstack((cycle, x_up, y_up, metric, supdate))
+
+        print(f'Exporting updates to: {out_csv}')
+        np.savetxt(out_csv, update, delimiter=",", header=header, comments="",
+                   fmt="%s")
 
     def summary(self, out=None, elapsed=None):
         elapsed = f'{elapsed/60:.2f}' if elapsed is not None else 'None'
@@ -296,7 +355,7 @@ class Problem:
         sum_str = '\n'.join(sum_text)
         print(sum_str)
         if out is not None:
-            print(f'Writing optimisation summary to: {out}')
+            print(f'Writing Kriging training summary to: {out}')
             with open(out, 'w') as f_out:
                 f_out.write(sum_str)
                 f_out.write('\n')
@@ -344,15 +403,20 @@ if __name__ == '__main__':
     src_opt_data = 'opt_data.csv'
     opt_data_in = f'{opt}/opt_data.csv'
     next_out = f'{opt}/next_samples.csv'
-    next_out_xlsx = f'{opt}/next_samples.xlsx'
     summary_out = f'{opt}/summary.txt'
-    out_pkl = f'{opt}/model.pkl'  # Save and reload trained Krig models
+    model_pkl = f'{opt}/model.pkl'  # Save and reload trained Krig models
+    results_pkl = f'{opt}/results.pkl'  # Save update results
 
-    # Check we're not overwriting an existing file
+    n_kb = 10  # number of Kriging Believer samples
+    n_cpu = 40  # number of CPUs to use
+    opt_cycle = f'opt_A12'  # Example output cycle name
+
     if reload:
+        # If --reload, try to load an class (with already trained models)
         if not pathlib.Path(opt_data_in).exists():
             raise ValueError(f'{opt_data_in} from previous run is missing.')
     else:
+        # Check we're not overwriting an existing file unless --overwrite
         if pathlib.Path(opt_data_in).exists() and not overwrite:
             msg = (f"{opt_data_in} already exists. Check out_name or use "
                    "'--reload' or '--overwrite' flags.")
@@ -362,8 +426,7 @@ if __name__ == '__main__':
         p_opt.mkdir(exist_ok=True)
         shutil.copy(src_opt_data, opt_data_in)
 
-    s_ref = 268.56 / 2  # Half aircraft
-
+    # 22 design variables - columns to extract from CSV
     geom_params = ['x', 'z', 'chord_0', 'tc_0', 'twist_0',
                    'le_sweep_1', 'dihedral_1', 'chord_1',
                    'tc_1', 'twist_1', 'proj_span_1',
@@ -371,35 +434,44 @@ if __name__ == '__main__':
                    'tc_2', 'twist_2', 'proj_span_2',
                    'le_sweep_3', 'dihedral_3', 'chord_3',
                    'tc_3', 'twist_3']
+
+    # 3 objectives - columns to extract from CSV
     objectives = ['CD_total', 'CM_x_abs', 'SELa_000.0']
 
+    # Load input data into numpy arrays
     df = pd.read_csv(opt_data_in, sep=',', index_col='name')
-
     X = df[geom_params].to_numpy()  # [n_samp, n_dv] Design vars
     y = df[objectives].to_numpy()  # [n_samp, n_obj] Objective vals
-    h = [cons.g_0, cons.g_1, cons.g_2, cons.g_3,
-         cons.g_4, cons.g_5, cons.g_6, cons.g_7]  # Cheap constraints
-    de_cons = [cons.nlc_0, cons.nlc_1, cons.nlc_2, cons.nlc_3,
-               cons.nlc_4, cons.nlc_5, cons.nlc_6]  # Cheap constraints passed to DE
 
+    # Load cheap constraints and bounds from constraints file
+    h = [cons.g_0, cons.g_1, cons.g_2, cons.g_3,
+         cons.g_4, cons.g_5, cons.g_6, cons.g_7]
+    # If using diff_evo, pass Scipy nlc constraints instead - these will be
+    # used directly by differential evolution. h constraints will be ignored
+    de_cons = [cons.nlc_0, cons.nlc_1, cons.nlc_2, cons.nlc_3,
+               cons.nlc_4, cons.nlc_5, cons.nlc_6]
+
+    # n_dv-length array of min and max bounds
     dv_min = cons.dv_min
     dv_max = cons.dv_max
 
+    # Default Kriging training settings - passed to all models
     krig_default = {'nrestart': 10,
                     'optimizer': 'lbfgsb',
                     }
+    # Specific ojective Kriging training settings - match names to columns!
+    # N.B. If required, a constraint Kriging dict can be set up in the same way
     obj_krig_map = {'default': krig_default,
                     'CD_total': {},
                     'CM_x_abs': {},
                     'SELa_000.0': {},
                     }
-    
-    n_kb = 8  # number of Kriging Believer sampes 
-    n_cpu = 40  # number of CPUs to use
+
+    # Settings for updates - aquisition func and optimiser-specific options here
     update_info = {'nup': 1,
-                   'nrestart': 3,  # number of solver restarts per KB sample
-                   # 'acquifunc': 'ehvi_vec',
-                   'acquifunc': 'ehvi_kmac3d',
+                   'nrestart': 4,  # number of solver restarts per KB sample
+                   # 'acquifunc': 'ehvi_vec',  # For 2D objectives
+                   'acquifunc': 'ehvi_kmac3d',  # For 3D objectives
                    # 'acquifuncopt': 'ga',
                    # 'ga_kwargs': {'disp': True,
                    #               'n_pop': 500},
@@ -409,40 +481,39 @@ if __name__ == '__main__':
                                  'strategy': 'best2bin',
                                  'constraints': de_cons,
                                  'popsize': 15,
-                                 'maxiter': 500,
+                                 'maxiter': 700,
                                  'tol': 1e-3,
                                  'mutation': (0.5, 1),
                                  'recombination': 0.85,
                                  'polish': False},
-                   'n_cpu': n_cpu,
                    'ehvisampling': 'default',  # 'default' / 'efficient'
-                   'refpoint': np.array([0.0500, 0.18, 100]),
+                   'refpoint': np.array([0.0500, 0.18, 100]),  # same order as objectives list
                    }
-
-    # output headers and cycle column
-    header = ','.join(['Cycle'] + geom_params + objectives + ['metric'] + [f's_{o}' for o in objectives])
-    cycle = np.array([opt] * n_kb).reshape(-1, 1)
 
     # Run optimisation
     t_opt = time.time()
-    # If specified, reload existing problem
-    if reload and pathlib.Path(out_pkl).exists():
-        print(f'Loading problem from: {out_pkl}')
-        with open(out_pkl, 'rb') as f:
+    # Reload existing problem with trained models, else train new Kriging models
+    if reload and pathlib.Path(model_pkl).exists():
+        print(f'Loading problem from: {model_pkl}')
+        with open(model_pkl, 'rb') as f:
             optim = pickle.load(f)
     else:
-        optim = Problem(X, y, dv_min, dv_max, x_labels=geom_params, y_labels=objectives, h=h)
-        optim.create_krig(obj_krig_map=obj_krig_map, con_krig_map=None, n_cpu=n_cpu)
-        optim.save_state(out_pkl)
-    xupdate, yupdate, supdate, metricall = optim.update_sample(update_info, n_kb, n_cpu=n_cpu)
+        # Create new problem
+        optim = Problem(X, y, dv_min, dv_max, x_labels=geom_params,
+                        y_labels=objectives, h=h)
+        # Train Kriging models
+        optim.create_krig(obj_krig_map=obj_krig_map, con_krig_map=None,
+                          n_cpu=n_cpu)
+        optim.save_state(model_pkl)
+
+    # Run optimizer on models for next updates
+    optim.update_sample(update_info, n_kb, n_cpu=n_cpu)
+    optim.save_state(results_pkl)
+    optim.export_update(next_out, opt_cycle=opt_cycle)  # Save outputs to CSV
     elapsed = time.time() - t_opt
 
-    print(f'Total optimisation time: {elapsed/60:.2f} mins')
-
-    totalupdate = np.hstack((cycle, xupdate, yupdate, metricall, supdate))
-    np.savetxt(next_out, totalupdate, delimiter=",", header=header, comments="", fmt="%s")
-
+    # Plot updates and save a training summary
     optim.plot_updates(out_dir=pathlib.Path(opt), title=opt)
-
     optim.summary(out=summary_out, elapsed=elapsed)
-    optim.save_state(out_pkl)
+
+    print(f'Total optimisation time: {elapsed/60:.2f} mins')
