@@ -14,7 +14,7 @@ find_package(pybind11)  # Use this if installed in environment
 # add_subdirectory(pybind11)  # Use this if pybind11 src is in this dir
 
 # Add the C++ wrapper
-pybind11_add_module(kmac
+pybind11_add_module(kmac SHARED
   kmac_wrapper.cpp
   ehvi_sliceupdate.cc ehvi_sliceupdate.h
   ehvi_multi.cc ehvi_multi.h

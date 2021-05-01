@@ -1,7 +1,29 @@
 """The constraint functions for optimsiation.
 
 The same constraint functions are used for initial sample generation.
+
+In this file, there are two versions of the same constraints:
+    g_0 - g_7: constraint functions in the format used by KADAL as part
+        of the multiconstfunc. These can be written to accept 2D inputs
+        to take advantage of numpy vectorisation, if the selected
+        optimiser can evaluate several samples at once. Should return 1
+        if satisfied, else 0.
+
+    n_0 - n_7: the same functions but rewritten using scipy.optimize
+        NonlinearConstraint functions. This is currently only used if
+        the selected optimiser is SciPy's 'diff_evo', as it can use
+        the constraint functions directly. Other optimisers use the
+        constraint functions as a penalty factor on the probability of
+        feasibility.
+        N.B. diff_evo cannot take advantage of multi-sample evaluation,
+        so the functions here do not need to be written in a vectorised
+        form.
+
+Last updated: 30/04/2021
 """
+__author__ = "Tim Jim"
+__version__ = '1.0.0'
+
 import argparse
 import numpy as np
 import pandas as pd
@@ -537,10 +559,6 @@ if __name__ == '__main__':
         dvs_i = dvs.iloc[i].to_numpy()  # the design vars of 1 sample
         for j in range(n_cons):
             feas[i, j] = cons[j](dvs_i)  # eval it for each constraint
-
-        # # quick visual check of my mistaken samples - you can delete this
-        # if not (feas[i, :] <= 0).all():
-        #     print(f'Sample {i}: {feas[i, :] <= 0}')
 
     # Now do the same thing in vectorised mode
     feas2 = np.zeros([n_samples, n_cons])

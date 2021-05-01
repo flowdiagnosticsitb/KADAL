@@ -87,9 +87,14 @@ class MOBO:
                 multiprocessing.Pool. Default 1 will not run a pool.
 
         Returns:
-            xupdate (nparray): Array of design variables updates.
-            yupdate (nparray): Array of objectives updates
-            metricall (nparray): Array of metric values of the updates.
+            xalltemp (np.ndarray): [n_kb, n_dv] array of update design
+                variable values.
+            yalltemp (np.ndarray): [n_kb, n_obj] array of update
+                objective values.
+            salltemp (np.ndarray): [n_kb, n_obj] array of update
+                objective uncertainty values.
+            metricall (np.ndarray): [n_kb, 1] array of update metric
+                values.
         """
 
         print(f'Running with n_cpu: {n_cpu} for supported functions.')
@@ -112,30 +117,33 @@ class MOBO:
                 Defaults to None.
 
         Returns:
-            xupdate (nparray): Array of design variables updates.
-            yupdate (nparray): Array of objectives updates
-            metricall (nparray): Array of metric values of the updates.
+            xalltemp (np.ndarray): [n_kb, n_dv] array of update design
+                variable values.
+            yalltemp (np.ndarray): [n_kb, n_obj] array of update
+                objective values.
+            salltemp (np.ndarray): [n_kb, n_obj] array of update
+                objective uncertainty values.
+            metricall (np.ndarray): [n_kb, 1] array of update metric
+                values.
         """
         self.nup = 0  # Number of current iteration
         self.Xall = self.kriglist[0].KrigInfo['X']
-        y_shape = [np.size(self.kriglist[0].KrigInfo["y"], axis=0),
-                   len(self.kriglist)]
-        self.yall = np.zeros(shape=y_shape)
-        for ii in range(np.size(self.yall,axis=1)):
-            self.yall[:,ii] = self.kriglist[ii].KrigInfo["y"][:,0]
+        n_samp = self.kriglist[0].KrigInfo["nsamp"]
+        n_krig = len(self.kriglist)
+        self.yall = np.zeros([n_samp, n_krig])
+        for ii in range(n_krig):
+            self.yall[:, ii] = self.kriglist[ii].KrigInfo["y"][:, 0]
 
         if infeasible is not None:
-            self.yall = np.delete(self.yall.copy(),infeasible,0)
+            self.yall = np.delete(self.yall.copy(), infeasible, 0)
             self.Xall = np.delete(self.Xall.copy(), infeasible, 0)
-        else:
-            pass
 
-        self.ypar,_ = searchpareto.paretopoint(self.yall)
+        self.ypar, _ = searchpareto.paretopoint(self.yall)
 
         print("Begin multi-objective Bayesian optimization process.")
         if self.autoupdate and disp:
-            print(f"Update no.: {self.nup+1}, F-count: {np.size(self.Xall,0)}, "
-                  f"Maximum no. updates: {self.moboInfo['nup']+1}")
+            print(f"Update no.: {self.nup + 1}, F-count: {n_samp}, "
+                  f"Maximum no. updates: {self.moboInfo['nup'] + 1}")
 
         # If the optimizer is ParEGO, create a scalarized Kriging
         if self.moboInfo['acquifunc'].lower() == 'parego':
@@ -155,23 +163,19 @@ class MOBO:
         elif self.moboInfo['acquifunc'].lower() == 'parego':
             self.paregoupdate(disp, pool=pool)
         else:
-            raise ValueError(self.moboInfo["acquifunc"], " is not a valid acquisition function.")
+            raise ValueError(f"{self.moboInfo['acquifunc']} is not a valid "
+                             f"acquisition function.")
 
         # Finish optimization and return values
         if disp:
             print("Optimization finished, now creating the final outputs.")
 
-        if self.multiupdate == 0 or self.multiupdate == 1:
-            xupdate = self.Xall[-self.moboInfo['nup']:, :]
-            yupdate = self.yall[-self.moboInfo['nup']:, :]
-            supdate = self.spredall[-self.moboInfo['nup']:, :]
-        else:
-            xupdate = self.Xall[(-self.moboInfo['nup']*self.multiupdate):, :]
-            yupdate = self.yall[(-self.moboInfo['nup']*self.multiupdate):, :]
-            supdate = self.spredall[(-self.moboInfo['nup']*self.multiupdate):, :]
+        xupdate = self.Xall[(-self.moboInfo['nup'] * self.multiupdate):, :]
+        yupdate = self.yall[(-self.moboInfo['nup'] * self.multiupdate):, :]
+        supdate = self.spredall[(-self.moboInfo['nup'] * self.multiupdate):, :]
         metricall = self.metricall
 
-        return xupdate,yupdate,supdate,metricall
+        return xupdate, yupdate, supdate, metricall
 
 
     def ehviupdate(self, disp=True, pool=None):
@@ -190,37 +194,24 @@ class MOBO:
         self.spredall = deepcopy(self.yall)
         self.spredall[:] = 0
         while self.nup < self.moboInfo['nup']:
-            # Iteratively update the reference point for hypervolume computation if EHVI is used as the acquisition function
+            # Iteratively update the reference point for hypervolume computation
+            # if EHVI is used as the acquisition function
             if self.moboInfo['refpointtype'].lower() == 'dynamic':
                 rp = (np.max(self.yall, 0)
                       + (np.max(self.yall, 0) - np.min(self.yall, 0)) * 2)
                 self.moboInfo['refpoint'] = rp
 
             # Perform update(s)
-            if self.multiupdate < 0:
-                raise ValueError("Number of multiple update must be greater or "
-                                 "equal to 0")
-            elif self.multiupdate in (0, 1):
-                x_n, met_n = run_multi_opt(self.kriglist, self.moboInfo,
-                                           self.ypar,
-                                           krigconstlist=self.krigconstlist,
-                                           cheapconstlist=self.cheapconstlist,
-                                           pool=pool)
-                xnext = x_n
-                metricnext = met_n
-                yprednext = np.zeros(shape=[2])
-                sprednext = np.zeros(shape=[2])
-                for ii,krigobj in enumerate(self.kriglist):
-                    yprednext[ii], sprednext[ii] = krigobj.predict(xnext,
-                                                                   ['pred','s'])
+            if self.multiupdate < 1:
+                raise ValueError("Number of multiple update must be > 1")
             else:
                 res = self.simultpredehvi(disp=disp, pool=pool)
                 xnext, yprednext, sprednext, metricnext = res
 
             if self.nup == 0:
-                self.metricall = metricnext
+                self.metricall = metricnext.reshape(-1, 1)
             else:
-                self.metricall = np.vstack((self.metricall,metricnext))
+                self.metricall = np.vstack((self.metricall, metricnext))
 
             # Break Loop if auto is false
             if self.autoupdate is False:
@@ -228,8 +219,6 @@ class MOBO:
                 self.yall = np.vstack((self.yall, yprednext))
                 self.spredall = np.vstack((self.spredall, sprednext))
                 break
-            else:
-                pass
 
             # Evaluate and enrich experimental design
             self.enrich(xnext, pool=pool)
@@ -275,9 +264,9 @@ class MOBO:
                 xnext, yprednext, metricnext = self.simultpredparego(pool=pool)
 
             if self.nup == 0:
-                self.metricall = metricnext
+                self.metricall = metricnext.reshape(-1, 1)
             else:
-                self.metricall = np.vstack((self.metricall,metricnext))
+                self.metricall = np.vstack((self.metricall, metricnext))
 
             # Break Loop if auto is false
             if not self.autoupdate:
@@ -309,17 +298,27 @@ class MOBO:
                 Defaults to None.
 
         Returns:
-             xalltemp (nparray) : Array of design variables updates.
-             yalltemp (nparray) : Array of objectives value updates.
-             metricall (nparray) : Array of metric of the updates.
+            xalltemp (np.ndarray): [n_kb, n_dv] array of update design
+                variable values.
+            yalltemp (np.ndarray): [n_kb, n_obj] array of update
+                objective values.
+            salltemp (np.ndarray): [n_kb, n_obj] array of update
+                objective uncertainty values.
+            metricall (np.ndarray): [n_kb, 1] array of update metric
+                values.
         """
+        n_krig = len(self.kriglist)
+        n_dv = self.kriglist[0].KrigInfo["nvar"]
 
-        # krigtemp = [0]*len(self.kriglist)
-        # for index,obj in enumerate(self.kriglist):
-        #     krigtemp[index] = deepcopy(obj)
         krigtemp = [deepcopy(obj) for obj in self.kriglist]
-        yprednext = np.zeros(shape=[len(krigtemp)])
-        sprednext = np.zeros(shape=[len(krigtemp)])
+        yprednext = np.zeros([n_krig])
+        sprednext = np.zeros([n_krig])
+
+        xalltemp = np.empty([self.multiupdate, n_dv])
+        yalltemp = np.empty([self.multiupdate, n_krig])
+        salltemp = np.empty([self.multiupdate, n_krig])
+        metricall = np.empty([self.multiupdate, 1])
+
         ypartemp = self.ypar
         yall = self.yall
 
@@ -333,38 +332,35 @@ class MOBO:
                                               krigconstlist=self.krigconstlist,
                                               cheapconstlist=self.cheapconstlist,
                                               pool=pool)
-            bound = np.vstack((- np.ones(shape=[1, krigtemp[0].KrigInfo["nvar"]]),
-                               np.ones(shape=[1, krigtemp[0].KrigInfo["nvar"]])))
 
-            for jj in range(len(krigtemp)):
-                yprednext[jj], sprednext[jj] = krigtemp[jj].predict(xnext,['pred','s'])
-                krigtemp[jj].KrigInfo['X'] = np.vstack((krigtemp[jj].KrigInfo['X'], xnext))
-                krigtemp[jj].KrigInfo['y'] = np.vstack((krigtemp[jj].KrigInfo['y'], yprednext[jj]))
-                krigtemp[jj].standardize()
-                krigtemp[jj].KrigInfo["F"] = compute_regression_mat(krigtemp[jj].KrigInfo["idx"],
-                                                                    krigtemp[jj].KrigInfo["X_norm"], bound,
-                                                                    np.ones(shape=[krigtemp[jj].KrigInfo["nvar"]]))
-                krigtemp[jj].KrigInfo = likelihood(krigtemp[jj].KrigInfo['Theta'], krigtemp[jj].KrigInfo, mode='all',
-                                                   trainvar=krigtemp[jj].trainvar)
+            bound = np.vstack((-np.ones([1, n_dv]), np.ones([1, n_dv])))
 
-            if ii == 0:
-                xalltemp = deepcopy(xnext)
-                yalltemp = deepcopy(yprednext)
-                salltemp = deepcopy(sprednext)
-                metricall = deepcopy(metrictemp)
-            else:
-                xalltemp = np.vstack((xalltemp,xnext))
-                yalltemp = np.vstack((yalltemp,yprednext))
-                salltemp = np.vstack((salltemp,sprednext))
-                metricall = np.vstack((metricall,metrictemp))
+            for jj, krig in enumerate(krigtemp):
+                yprednext[jj], sprednext[jj] = krig.predict(xnext, ['pred', 's'])
+                krig.KrigInfo['X'] = np.vstack((krig.KrigInfo['X'], xnext))
+                krig.KrigInfo['y'] = np.vstack((krig.KrigInfo['y'], yprednext[jj]))
+                krig.standardize()
+                krig.KrigInfo["F"] = compute_regression_mat(krig.KrigInfo["idx"],
+                                                            krig.KrigInfo["X_norm"],
+                                                            bound,
+                                                            np.ones([n_dv]))
+                krig.KrigInfo = likelihood(krig.KrigInfo['Theta'],
+                                           krig.KrigInfo,
+                                           mode='all',
+                                           trainvar=krig.trainvar)
 
-            yall = np.vstack((yall,yprednext))
-            ypartemp,_ = searchpareto.paretopoint(yall)
+            xalltemp[ii, :] = xnext[:]
+            yalltemp[ii, :] = yprednext[:]
+            salltemp[ii, :] = sprednext[:]
+            metricall[ii, :] = metrictemp
+
+            yall = np.vstack((yall, yprednext))
+            ypartemp, _ = searchpareto.paretopoint(yall)
 
             if disp:
-                print("time: ",time.time()-t1," s")
+                print(f"time: {time.time() - t1:.2f} s")
 
-        return [xalltemp,yalltemp,salltemp,metricall]
+        return xalltemp, yalltemp, salltemp, metricall
 
 
     def simultpredparego(self, pool=None):

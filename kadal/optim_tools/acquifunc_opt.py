@@ -66,14 +66,15 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
 
     n_restart = soboInfo["nrestart"]
     n_var = krigobj.KrigInfo["nvar"]
-
     low_bound = krigobj.KrigInfo["lb"]
     up_bound = krigobj.KrigInfo["ub"]
+
+    xnextcand = np.zeros(shape=[n_restart, n_var])
+    fnextcand = np.zeros(shape=[n_restart])
+
     if acquifuncopt.lower() == 'cmaes':
         Xrand = realval(low_bound, up_bound,
                         np.random.rand(n_restart, n_var))
-        xnextcand = np.zeros(shape=[n_restart, n_var])
-        fnextcand = np.zeros(shape=[n_restart])
         sigmacmaes = 1  # np.mean((KrigNewMultiInfo["ub"] - KrigNewMultiInfo["lb"]) / 6)
         for im in range(0, n_restart):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
@@ -86,15 +87,10 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
                                                  {'verb_disp': 0, 'verbose': -9},
                                                  args=(krigobj, acquifunc, krigconstlist,cheapconstlist))
                 fnextcand[im] = es.result[1]
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'lbfgsb':
-        Xrand = realval(low_bound, up_bound,
-                        np.random.rand(n_restart, n_var))
-        xnextcand = np.zeros(shape=[n_restart, n_var])
-        fnextcand = np.zeros(shape=[n_restart])
+        Xrand = realval(low_bound, up_bound, np.random.rand(n_restart, n_var))
+
         lbfgsbbound = np.hstack((low_bound.reshape(-1, 1), up_bound.reshape(-1, 1)))
         for im in range(0, n_restart):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
@@ -106,9 +102,6 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
                                args=(krigobj, acquifunc, krigconstlist,cheapconstlist))
                 xnextcand[im, :] = res.x
                 fnextcand[im] = res.fun
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'diff_evo':
         if 'de_kwargs' in soboInfo:
@@ -133,9 +126,6 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
         else:
             workers = 1  # Default DE flag
 
-        xnextcand = np.zeros(shape=[n_restart, n_var])
-        fnextcand = np.zeros(shape=[n_restart])
-
         for im in range(n_restart):
             r_t = time.time()
 
@@ -147,15 +137,10 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
                       n_eval=res.nfev, n_gen=res.nit, i_restart=im,
                       n_restart=n_restart)
 
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
-
     elif acquifuncopt.lower() == 'cobyla':
         Xrand = realval(low_bound, up_bound,
                         np.random.rand(n_restart, n_var))
-        xnextcand = np.zeros(shape=[n_restart, n_var])
-        fnextcand = np.zeros(shape=[n_restart])
+
         optimbound = []
         for i in range(len(up_bound)):
             optimbound.append(lambda x, krigobj, aa, bb, cc, itemp=i: x[itemp] - krigobj.KrigInfo["lb"][itemp])
@@ -171,9 +156,10 @@ def run_single_opt(krigobj, soboInfo, krigconstlist=None, cheapconstlist=None,
                                   rhobeg=0.5, rhoend=1e-4, args=(krigobj, acquifunc, krigconstlist,cheapconstlist))
                 xnextcand[im, :] = res
                 fnextcand[im] = singleconstfun(res, krigobj, acquifunc, krigconstlist,cheapconstlist)
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
+
+    I = np.argmin(fnextcand)
+    xnext = xnextcand[I, :]
+    fnext = fnextcand[I]
 
     return (xnext,fnext)
 
@@ -232,11 +218,14 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
     low_bound = kriglist[0].KrigInfo["lb"]
     up_bound = kriglist[0].KrigInfo["ub"]
 
+    # n_restart length array for KB solutions
+    xnextcand = np.zeros(shape=[n_restart, n_var])
+    fnextcand = np.zeros(shape=[n_restart])
+
     if acquifuncopt.lower() == 'cmaes':
         Xrand = realval(low_bound, up_bound,
                         np.random.rand(n_restart, n_var))
-        xnextcand = np.zeros(shape=[n_restart, n_var])
-        fnextcand = np.zeros(shape=[n_restart])
+
         sigmacmaes = 1  # np.mean((KrigNewMultiInfo["ub"] - KrigNewMultiInfo["lb"]) / 6)
         for im in range(0, n_restart):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
@@ -249,9 +238,6 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
                                                  {'verb_disp': 0, 'verbose': -9},
                                                  args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist))
                 fnextcand[im] = es.result[1]
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'ga':
         # Load SciPy DE settings from de_kwargs dict
@@ -269,9 +255,6 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
         func = multiconstfun
         args = (ypar, kriglist, moboInfo, krigconstlist, cheapconstlist)
 
-        xnextcand = np.zeros(shape=[n_restart, n_var])
-        fnextcand = np.zeros(shape=[n_restart])
-
         for im in range(n_restart):
             r_t = time.time()
             x, metric, _ = uncGA2(func, lb=low_bound, ub=up_bound, args=args,
@@ -282,15 +265,10 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
             # TODO: Fill more outputs - maybe have a general results class like SciPY results object
             print_res(r_t, metric, x, n_gen=_[-1, 0], i_restart=im, n_restart=n_restart)
 
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
-
     elif acquifuncopt.lower() == 'lbfgsb':
         Xrand = realval(low_bound, up_bound,
                         np.random.rand(n_restart, n_var))
-        xnextcand = np.zeros(shape=[n_restart, n_var])
-        fnextcand = np.zeros(shape=[n_restart])
+
         lbfgsbbound = np.hstack((low_bound.reshape(-1, 1), up_bound.reshape(-1, 1)))
         for im in range(0, n_restart):
             if krigconstlist is None and cheapconstlist is None:  # For unconstrained problem
@@ -303,9 +281,6 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
                                args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist))
                 xnextcand[im, :] = res.x
                 fnextcand[im] = res.fun
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'diff_evo':
         # Load SciPy DE settings from de_kwargs dict
@@ -339,9 +314,6 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
         else:
             workers = 1  # Default DE flag
 
-        xnextcand = np.zeros(shape=[n_restart, n_var])
-        fnextcand = np.zeros(shape=[n_restart])
-
         for im in range(n_restart):
             r_t = time.time()
 
@@ -353,15 +325,10 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
                       n_eval=res.nfev, n_gen=res.nit, i_restart=im,
                       n_restart=n_restart)
 
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
-
     elif acquifuncopt.lower() == 'cobyla':
         Xrand = realval(low_bound, up_bound,
                         np.random.rand(n_restart, n_var))
-        xnextcand = np.zeros(shape=[n_restart, n_var])
-        fnextcand = np.zeros(shape=[n_restart])
+
         optimbound = []
         for i in range(len(up_bound)):
             optimbound.append(lambda x, cc, kriglist, dd, aa, bb, itemp=i: x[itemp] - kriglist[0].KrigInfo["lb"][itemp])
@@ -377,9 +344,6 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
                                   rhobeg=0.5, rhoend=1e-4, args=(ypar, kriglist, moboInfo, krigconstlist, cheapconstlist))
                 xnextcand[im, :] = res
                 fnextcand[im] = multiconstfun(res,ypar, kriglist, moboInfo, krigconstlist, cheapconstlist)
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
 
     elif acquifuncopt.lower() == 'fcmaes':
         # Delayed import as fcmaes is not installed by default
@@ -406,9 +370,6 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
                                                popsize=fc_kwargs['popsize'],
                                                stop_fitness=fc_kwargs['stop_fitness'])
 
-        xnextcand = np.zeros(shape=[n_restart, n_var])
-        fnextcand = np.zeros(shape=[n_restart])
-
         for im in range(n_restart):
             r_t = time.time()
             res = fcmaes.advretry.minimize(func.eval, optimbound,
@@ -421,12 +382,13 @@ def run_multi_opt(kriglist, moboInfo, ypar, krigconstlist=None,
             print_res(r_t, res.fun, res.x, success=res.success,
                       n_eval=res.nfev, i_restart=im, n_restart=n_restart)
 
-        I = np.argmin(fnextcand)
-        xnext = xnextcand[I, :]
-        fnext = fnextcand[I]
     else:
         msg = f"Requested acquifuncopt '{acquifuncopt}' is not available."
         raise NotImplementedError(msg)
+
+    I = np.argmin(fnextcand)
+    xnext = xnextcand[I, :]
+    fnext = fnextcand[I]
 
     return xnext, fnext
 
@@ -548,7 +510,7 @@ def multiconstfun(x, ypar, kriglist, moboInfo, krigconstlist=None,
             for Bayesian optimization.
         krigconstlist ([kriging_model.Kriging], optional): List of
             constraint Kriging objects. Defaults to None.
-        cheapconstlist ([func]], optional): List of constraints
+        cheapconstlist ([func]], optional): List of constraint
             functions. Defaults to None.
             Expected output of a constraint function is 1 if the
             constraint is satisfied and 0 if not.
