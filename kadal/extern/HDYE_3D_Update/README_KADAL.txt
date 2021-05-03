@@ -6,19 +6,19 @@ Hypervolume Improvement (EHVI))
 Original C++ code by Michael Emmerich, Leiden University
 
 Modifications and pybind11 wrapper coded by Tim Jim, Tohoku University
-21/04/2021
+03/05/2021
 
 ########################################################################
 
 TL;DR --> install like this:
-   ## UNIX
+   ## UNIX/Linux
    ($ activate kadal_env / $ conda activate kadal_env)  # if necessary
    $ pip install pybind11 / $ conda install -c conda-forge pybind11
    $ cmake .
    $ make
    $ python test_single.py
 
-   ## WINDOWS
+   ## WINDOWS - if you have Visual Studio / cmake
    # Activate your venv if necessary
    # Download and Install cmake if you don't have any
    > pip install pybind11 / > conda install -c conda-forge pybind11
@@ -26,6 +26,29 @@ TL;DR --> install like this:
    > cmake .
    > cmake --build . --config Release --target cmake
    # This will generate cmake.cp36-win_amd64.pyd under `Release` directory, copy this file up to one level.
+   > python test_single.py  # perform test
+
+   ## WINDOWS - If you have nothing
+   # Alternative walkthrough  with MSBuild.exe and no explicit path setting
+   # Download "Build Tools for Visual Studio 2019" (no need for full VS)
+   # https://docs.microsoft.com/en-us/cpp/build/building-on-the-command-line?view=msvc-160
+   # https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2019
+   # Install "C++ build tools" workload only
+   # Start "Developer Command Prompt for VS 2019" for compiler paths
+   > powershell.exe  # Start powershell from the developer cmd prompt
+   # Now, let's load our conda powershell variables/environment
+   > cd "C:\Users\USERNAME\anaconda3\shell\condabin\"
+   > .\conda-hook.ps1
+   # Now we can activate the python env and install pybind11 and cmake, if necessary
+   > conda activate
+   > conda activate your-kadal-env
+   > pip install pybind11 / > conda install -c conda-forge pybind11 cmake
+   > cd "PATH-TO\kadal\extern\HDYE_3D_Update""
+   # Now we can build
+   > cmake .  # Generates CMakeFiles and kmac.sln
+   > MSBuild.exe .\kmac.sln  # Generates kmac.***.pyd wrapper file in a subdir
+   # Copy from the subdir to current directory level
+   > cp Debug\kmac.YOUR-PY-VER.pyd .  # copies to here
    > python test_single.py  # perform test
 
 ########################################################################
