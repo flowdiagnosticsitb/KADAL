@@ -376,7 +376,14 @@ class Problem:
             axes.scatter(y[:, a], y[:, b], c='#1f77b4', label='initial samples')
             axes.scatter(yupdate[:, a], yupdate[:, b], c='#ff7f0e', label='predicted next samples')
             axes.errorbar(yupdate[:, a], yupdate[:, b], xerr=supdate[:, a], yerr=supdate[:, b], fmt='o', color='orange')
-            # axes.errorbar(yupdate[:, a], yupdate[:, b], yerr=supdate[:, b], fmt='o', color='orange')
+
+            # Annotate order of KB points
+            for i in range(yupdate.shape[0]):
+                axes.annotate(f'KB{i}', xy=(yupdate[i, a], yupdate[i, b]), xytext=(-25, -25),
+                              textcoords='offset points', ha='center', va='bottom',
+                              bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3),
+                              arrowprops=dict(arrowstyle='->',  # connectionstyle='arc3,rad=0.5',
+                                              color='black'))
 
             x_label = self.y_labels[a]
             y_label = self.y_labels[b]
@@ -386,6 +393,10 @@ class Problem:
             if out_dir is not None:
                 out_dir = pathlib.Path(out_dir)
                 fig.savefig(out_dir / f'{y_label}_vs_{x_label}.png')
+
+        if out_dir is None:
+            plt.show()
+            plt.close()
 
 
 if __name__ == '__main__':
@@ -400,6 +411,7 @@ if __name__ == '__main__':
     reload = args.reload
 
     opt = f'opt_{name}'
+    index_col = None
     src_opt_data = 'opt_data.csv'
     opt_data_in = f'{opt}/opt_data.csv'
     next_out = f'{opt}/next_samples.csv'
@@ -427,19 +439,13 @@ if __name__ == '__main__':
         shutil.copy(src_opt_data, opt_data_in)
 
     # 22 design variables - columns to extract from CSV
-    geom_params = ['x', 'z', 'chord_0', 'tc_0', 'twist_0',
-                   'le_sweep_1', 'dihedral_1', 'chord_1',
-                   'tc_1', 'twist_1', 'proj_span_1',
-                   'le_sweep_2', 'dihedral_2', 'chord_2',
-                   'tc_2', 'twist_2', 'proj_span_2',
-                   'le_sweep_3', 'dihedral_3', 'chord_3',
-                   'tc_3', 'twist_3']
+    geom_params = ['a', 'b', 'c']
 
     # 3 objectives - columns to extract from CSV
-    objectives = ['CD_total', 'CM_x_abs', 'SELa_000.0']
+    objectives = ['d', 'e', 'f']
 
     # Load input data into numpy arrays
-    df = pd.read_csv(opt_data_in, sep=',', index_col='name')
+    df = pd.read_csv(opt_data_in, sep=',', index_col=index_col)
     X = df[geom_params].to_numpy()  # [n_samp, n_dv] Design vars
     y = df[objectives].to_numpy()  # [n_samp, n_obj] Objective vals
 

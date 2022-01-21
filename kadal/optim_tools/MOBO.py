@@ -322,10 +322,16 @@ class MOBO:
         ypartemp = self.ypar
         yall = self.yall
 
+        # Header for temp solutions csv (current solutions for each update)
+        temp_csv_header = ([f'dv_{d}' for d in range(n_dv)]
+                           + [f'o_{d}' for d in range(n_krig)]
+                           + [f's_{d}' for d in range(n_krig)]
+                           + ['metric'])
+
         for ii in range(self.multiupdate):
             t1 = time.time()
             if disp:
-                print(f"update number {ii+1}")
+                print(f"##### Update number {ii+1} #####")
 
             xnext, metrictemp = run_multi_opt(krigtemp, self.moboInfo,
                                               ypartemp,
@@ -356,6 +362,13 @@ class MOBO:
 
             yall = np.vstack((yall, yprednext))
             ypartemp, _ = searchpareto.paretopoint(yall)
+
+            # Write current solutions to a temp csv in case of crashes etc
+            if disp:
+                print(f"Writing current updates to current_updates.csv")
+            totalupdate = np.hstack((xalltemp[:ii+1, :], yalltemp[:ii+1, :], salltemp[:ii+1, :], metricall[:ii+1]))
+            np.savetxt('current_updates.csv', totalupdate, delimiter=",",
+                       header=','.join(temp_csv_header), comments="", fmt="%s")
 
             if disp:
                 print(f"time: {time.time() - t1:.2f} s")
